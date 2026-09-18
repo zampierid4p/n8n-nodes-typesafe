@@ -17,3 +17,6 @@ npm-debug.log*
 .agents/
 .claude/
 skills-lock.json
+
+# npm pack output
+*.tgz
