@@ -80,7 +80,7 @@ aliases — set the Model field via expression to pin one.
 
 ## Install
 
-In n8n: **Settings → Community nodes → Install** → `n8n-nodes-typesafe-ai`.
+In n8n: **Settings → Community nodes → Install** → `n8n-nodes-typesafe`.
 
 ## Development
 
