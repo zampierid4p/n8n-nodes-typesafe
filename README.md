@@ -55,6 +55,29 @@ It is off by default on purpose: it discards the probabilities and confidence th
 tell you whether a judgment is safe to act on. See
 [Confidence](https://docs.typesafe.ai/confidence.md) before turning it on.
 
+### Output mode
+
+By default the node has one output carrying every answer. Set **Output Mode** to
+*One Output per Question* and it grows one branch per question instead, labelled
+with the question id, so each judgment can drive its own downstream logic —
+`is_urgent` notifies, `department` assigns, `frustration` escalates.
+
+This does not change how many API calls are made. Every question still travels
+in a single request and is answered against the same state; only the delivery
+side splits.
+
+Each branch emits `{ questionId, ...answer }`, so `probabilities` and
+`confidence` stay available where you branch on them. With **Simplify** on, a
+branch emits `{ <id>: value }` instead. A question the model did not answer
+leaves its branch empty rather than passing a blank item on. With *Continue On
+Fail*, failures leave by the first branch, which is the convention n8n's own
+Switch node uses.
+
+> **Rewiring:** n8n stores connections by position, not by name. Adding,
+> removing or reordering questions shifts the branches underneath existing
+> links, and nothing will warn you — the wiring simply points at a different
+> judgment. Check the connections after changing the question list.
+
 ### Options
 
 | Option | Default | Notes |

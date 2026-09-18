@@ -94,6 +94,35 @@ function parseChoiceCriteria(value: string | undefined): Record<string, string |
 	return criteria;
 }
 
+/** The scalar a caller usually wants out of an answer. */
+function answerValue(answer: Answer): number | string {
+	if (answer.type === 'noul') return answer.noul;
+	if (answer.type === 'choice') return answer.choice;
+	return answer.score;
+}
+
+/**
+ * n8n serialises this function into the outputs expression and evaluates it in
+ * the editor as well as at runtime, so it must stay pure, self-contained, and
+ * free of optional chaining or template literals that would not survive being
+ * turned back into source.
+ */
+const configuredOutputs = (parameters: IDataObject) => {
+	const single = [{ type: 'main' }];
+	if (parameters.outputMode !== 'perQuestion') return single;
+
+	const collection = parameters.questions as IDataObject | undefined;
+	const questions =
+		collection && Array.isArray(collection.question) ? (collection.question as IDataObject[]) : [];
+	if (questions.length === 0) return single;
+
+	return questions.map((question, index) => {
+		const id = typeof question.id === 'string' ? question.id.trim() : '';
+		const named = id.length > 0 && id.charAt(0) !== '=';
+		return { type: 'main', displayName: named ? id : 'Question ' + (index + 1) };
+	});
+};
+
 export class TypeSafe implements INodeType {
 	description: INodeTypeDescription = {
 		displayName: 'TypeSafe',
@@ -107,7 +136,8 @@ export class TypeSafe implements INodeType {
 			name: 'TypeSafe',
 		},
 		inputs: ['main'],
-		outputs: ['main'],
+		// eslint-disable-next-line n8n-nodes-base/node-class-description-outputs-wrong
+		outputs: `={{(${configuredOutputs})($parameter)}}`,
 		credentials: [
 			{
 				name: CREDENTIAL,
@@ -129,6 +159,28 @@ export class TypeSafe implements INodeType {
 					},
 				],
 				default: 'ask',
+			},
+			{
+				displayName: 'Output Mode',
+				name: 'outputMode',
+				type: 'options',
+				noDataExpression: true,
+				options: [
+					{
+						name: 'One Output per Question',
+						value: 'perQuestion',
+						description:
+							'One branch per question, so each judgment can drive its own logic. Still a single API call.',
+					},
+					{
+						name: 'Single Output',
+						value: 'single',
+						description: 'One item carrying every answer, plus the model and token usage',
+					},
+				],
+				default: 'single',
+				description:
+					'How the answers leave the node. Adding, removing or reordering questions shifts the branches, and n8n keeps connections by position, so check the wiring afterwards.',
 			},
 			{
 				displayName: 'Model Name or ID',
@@ -391,7 +443,18 @@ export class TypeSafe implements INodeType {
 
 	async execute(this: IExecuteFunctions): Promise<INodeExecutionData[][]> {
 		const items = this.getInputData();
-		const returnData: INodeExecutionData[] = [];
+
+		// The node's shape is fixed by the parameters as they stand in the editor, so
+		// the branch count comes from item 0 and stays put for every item.
+		const outputMode = this.getNodeParameter('outputMode', 0, 'single') as string;
+		const branchCount =
+			outputMode === 'perQuestion'
+				? (this.getNodeParameter('questions.question', 0, []) as QuestionInput[]).length
+				: 0;
+		const perQuestion = outputMode === 'perQuestion' && branchCount > 0;
+		const returnData: INodeExecutionData[][] = perQuestion
+			? Array.from({ length: branchCount }, () => [])
+			: [[]];
 
 		const credentials = await this.getCredentials(CREDENTIAL);
 		const baseUrl = (credentials.baseUrl as string).replace(/\/+$/, '');
@@ -563,35 +626,54 @@ export class TypeSafe implements INodeType {
 				}
 
 				const answers = response.answers ?? {};
-				let payload: IDataObject;
+				const nest = (value: IDataObject): IDataObject =>
+					options.outputField ? { [options.outputField]: value } : value;
 
-				if (options.simplify === true) {
-					payload = {};
-					for (const [id, answer] of Object.entries(answers)) {
-						if (answer.type === 'noul') {
-							payload[id] = answer.noul;
-						} else if (answer.type === 'choice') {
-							payload[id] = answer.choice;
-						} else {
-							payload[id] = answer.score;
-						}
+				if (perQuestion) {
+					// Branch n carries question n, matched by position rather than by id so
+					// that an id built from an expression still lands on the right branch.
+					for (let branch = 0; branch < branchCount; branch++) {
+						const input = questionInputs[branch];
+						if (input === undefined) continue;
+
+						const id = (input.id ?? '').trim();
+						const answer = answers[id];
+						// A question with no answer leaves its branch empty, which stops the
+						// downstream nodes on that branch rather than feeding them a blank.
+						if (answer === undefined) continue;
+
+						const branchPayload: IDataObject =
+							options.simplify === true
+								? { [id]: answerValue(answer) }
+								: { questionId: id, ...(answer as unknown as IDataObject) };
+
+						returnData[branch].push({
+							json: nest(branchPayload),
+							pairedItem: { item: itemIndex },
+						});
 					}
 				} else {
-					payload = {
-						model: response.model,
-						answers: answers as unknown as IDataObject,
-						usage: response.usage as unknown as IDataObject,
-					};
-				}
+					let payload: IDataObject;
 
-				if (options.outputField) {
-					payload = { [options.outputField]: payload };
-				}
+					if (options.simplify === true) {
+						payload = {};
+						for (const [id, answer] of Object.entries(answers)) {
+							payload[id] = answerValue(answer);
+						}
+					} else {
+						payload = {
+							model: response.model,
+							answers: answers as unknown as IDataObject,
+							usage: response.usage as unknown as IDataObject,
+						};
+					}
 
-				returnData.push({ json: payload, pairedItem: { item: itemIndex } });
+					returnData[0].push({ json: nest(payload), pairedItem: { item: itemIndex } });
+				}
 			} catch (error) {
 				if (this.continueOnFail()) {
-					returnData.push({
+					// Same convention as the Switch node: failures leave by the first branch.
+					returnData[0].push({
 						json: { error: (error as Error).message },
 						pairedItem: { item: itemIndex },
 					});
@@ -601,6 +683,6 @@ export class TypeSafe implements INodeType {
 			}
 		}
 
-		return [returnData];
+		return returnData;
 	}
 }
