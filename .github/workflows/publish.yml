@@ -53,9 +53,6 @@ jobs:
             exit 1
           fi
           echo "both OIDC variables present"
-          echo "registry: $(npm config get registry)"
-          echo "npmrc files npm will read:"
-          npm config list -l 2>/dev/null | grep -iE "^; .*npmrc|^userconfig|^globalconfig" || true
 
       - name: Install dependencies
         run: npm ci --ignore-scripts
@@ -100,7 +97,7 @@ jobs:
 
       - name: Publish
         if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && !inputs.dry_run)
-        run: npm publish --loglevel verbose
+        run: npm publish
 
       - name: Dry run finished
         if: github.event_name == 'workflow_dispatch' && inputs.dry_run
