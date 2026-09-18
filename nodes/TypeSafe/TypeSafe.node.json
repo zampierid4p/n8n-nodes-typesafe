@@ -2,7 +2,10 @@
 	"node": "n8n-nodes-typesafe.typeSafe",
 	"nodeVersion": "1.0",
 	"codexVersion": "1.0",
-	"categories": ["AI", "Development"],
+	"categories": [
+		"Development",
+		"Miscellaneous"
+	],
 	"resources": {
 		"credentialDocumentation": [
 			{
