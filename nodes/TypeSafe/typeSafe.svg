@@ -1,26 +1,35 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="TypeSafe">
   <style>
-    .m { fill: none; stroke: #101828; stroke-width: 3.2; stroke-linecap: round; stroke-linejoin: round; }
-    @media (prefers-color-scheme: dark) { .m { stroke: #f2f4f7; } }
+    .m {
+      fill: none;
+      stroke: #000;
+      stroke-width: 2.81;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+    @media (prefers-color-scheme: dark) { .m { stroke: #fff; } }
   </style>
   <g class="m">
-    <path d="M23.66 3.1L40.34 12.73"/>
-    <path d="M40.34 12.73L40.34 32.0"/>
-    <path d="M40.34 32.0L23.66 41.63"/>
-    <path d="M23.66 41.63L6.97 32.0"/>
-    <path d="M6.97 32.0L6.97 12.73"/>
-    <path d="M6.97 12.73L23.66 3.1"/>
-    <path d="M23.66 22.37L6.97 12.73"/>
-    <path d="M23.66 22.37L40.34 12.73"/>
-    <path d="M23.66 22.37L23.66 41.63"/>
-    <path d="M40.34 22.37L57.03 32.0"/>
-    <path d="M57.03 32.0L57.03 51.27"/>
-    <path d="M57.03 51.27L40.34 60.9"/>
-    <path d="M40.34 60.9L23.66 51.27"/>
-    <path d="M23.66 51.27L23.66 32.0"/>
-    <path d="M23.66 32.0L40.34 22.37"/>
-    <path d="M40.34 41.63L23.66 32.0"/>
-    <path d="M40.34 41.63L57.03 32.0"/>
-    <path d="M40.34 41.63L40.34 60.9"/>
+    <path d="M11.22 14L32 2"/>
+    <path d="M21.61 20L32 14"/>
+    <path d="M11.22 38L21.61 32"/>
+    <path d="M32 26L42.39 20"/>
+    <path d="M21.61 44L32 38"/>
+    <path d="M21.61 56L42.39 44"/>
+    <path d="M37.2 59L52.78 50"/>
+    <path d="M32 2L42.39 8"/>
+    <path d="M32 14L52.78 26"/>
+    <path d="M21.61 20L32 26"/>
+    <path d="M21.61 32L32 38"/>
+    <path d="M42.39 44L52.78 50"/>
+    <path d="M11.22 38L21.61 44"/>
+    <path d="M21.61 56L32 62"/>
+    <path d="M52.78 26L52.78 50"/>
+    <path d="M42.39 8L42.39 44"/>
+    <path d="M32 2L32 14"/>
+    <path d="M32 26L32 38"/>
+    <path d="M21.61 20L21.61 32"/>
+    <path d="M21.61 44L21.61 56"/>
+    <path d="M11.22 14L11.22 38"/>
   </g>
 </svg>
