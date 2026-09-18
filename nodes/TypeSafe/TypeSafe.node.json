@@ -1,17 +1,17 @@
 {
-	"node": "n8n-nodes-base.typesafeAi",
+	"node": "n8n-nodes-typesafe-ai.typeSafe",
 	"nodeVersion": "1.0",
 	"codexVersion": "1.0",
 	"categories": ["AI", "Development"],
 	"resources": {
 		"credentialDocumentation": [
 			{
-				"url": "https://github.com/zampierid4p/n8n-nodes-typesafe-ai"
+				"url": "https://docs.typesafe.ai/api"
 			}
 		],
 		"primaryDocumentation": [
 			{
-				"url": "https://github.com/zampierid4p/n8n-nodes-typesafe-ai#readme"
+				"url": "https://docs.typesafe.ai/primitives"
 			}
 		]
 	}

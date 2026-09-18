@@ -1,47 +1,78 @@
 # n8n-nodes-typesafe-ai
 
-Type-safe AI community node for [n8n](https://n8n.io). Call any OpenAI-compatible
-model and get back an object that is **validated against your JSON Schema** — with
-automatic re-prompting when the model gets it wrong.
+[n8n](https://n8n.io) community node for [TypeSafe](https://docs.typesafe.ai)
+System One models. Ask **typed questions** about your data and get back calibrated
+probabilities your workflow can branch on — not free text you have to parse.
 
-## Node: Typesafe AI
+## Node: TypeSafe
 
-Operation `Structured Output`:
+Operation `Ask Questions` sends a `state` plus a map of questions to
+`POST /v1/systemone` and returns one answer per question.
 
-1. Sends your prompt to `POST {baseUrl}/chat/completions` with
-   `response_format: { type: "json_schema" }`.
-2. Validates the returned JSON locally with [Ajv](https://ajv.js.org) against the
-   same schema.
-3. On a validation failure, feeds the errors back to the model and retries
-   (configurable, default 1 retry).
-4. Fails the item — or emits an `error` field with *Continue On Fail* — if the
-   output never validates.
+All questions in the node go out in **a single request** and are evaluated in
+parallel against the same state. That is the point: per TypeSafe's
+[parallel questions cookbook](https://docs.typesafe.ai/cookbooks/parallel_questions.md),
+batching is dramatically cheaper and faster than one call per question, so put
+independent questions in one node rather than chaining several.
 
-### Parameters
+### Question types
 
-| Parameter | Description |
+| Type | Answer | Use for |
+| --- | --- | --- |
+| **Noul** | `noul`: probability 0–1 that the answer is yes | whether a condition holds |
+| **Choice** | `choice` + `probabilities` per option + `confidence` | picking one option from a set |
+| **Score** | `score` (probability-weighted, can land between levels) + `legend` + `probabilities` + `confidence` | rating against ordered levels |
+
+Options are written one per line as `option = description` (the description is
+optional). Score levels are one per line, lowest to highest, at least two.
+
+For structured `instructions` or `criteria` — see
+[Advanced: structure](https://docs.typesafe.ai/primitives/advanced.md) — switch a
+question to **Define as JSON** and supply the whole question object.
+
+### Output
+
+By default each item carries the full response:
+
+```json
+{
+  "model": "jev-1.13.0",
+  "answers": {
+    "is_urgent": { "type": "noul", "noul": 0.92 },
+    "department": {
+      "type": "choice",
+      "choice": "technical",
+      "probabilities": { "billing": 0.08, "technical": 0.85, "sales": 0.07 },
+      "confidence": 0.82
+    }
+  },
+  "usage": { "input_tokens": 312, "output_tokens": 48 }
+}
+```
+
+The **Simplify** option reduces this to `{ "is_urgent": 0.92, "department": "technical" }`.
+It is off by default on purpose: it discards the probabilities and confidence that
+tell you whether a judgment is safe to act on. See
+[Confidence](https://docs.typesafe.ai/confidence.md) before turning it on.
+
+### Options
+
+| Option | Default | Notes |
+| --- | --- | --- |
+| Max Retries | `3` | Retries `429 Too Many Requests` and `529 Overloaded`, honouring `retry-after`, otherwise exponential backoff. Other statuses fail immediately. |
+| Put Output in Field | — | Nest the result under a field |
+| Simplify | `false` | Answer values only, dropping probabilities and confidence |
+
+### Credential: TypeSafe API
+
+| Field | Default |
 | --- | --- |
-| Model | Model ID as exposed by the configured API, e.g. `gpt-4o-mini` |
-| Prompt | The user message |
-| Schema Name | Name reported to the API for the schema |
-| JSON Schema | The schema the output must satisfy |
+| API Key | — (sent as `Authorization: Bearer …`) |
+| Base URL | `https://api.typesafe.ai/v1` |
 
-Options: `System Prompt`, `Temperature`, `Max Tokens`, `Max Retries`,
-`Strict Schema`, `Put Output In Field`, `Return Raw Response`.
-
-### Credential: Typesafe AI API
-
-| Field | Notes |
-| --- | --- |
-| Base URL | Any OpenAI-compatible endpoint — OpenAI, Azure OpenAI, OpenRouter, Ollama, vLLM |
-| API Key | Sent as `Authorization: Bearer …` |
-
-Credential test calls `GET {baseUrl}/models`.
-
-> **Strict Schema** (on by default) asks the provider to enforce the schema
-> server-side. Providers that support it require `"additionalProperties": false`
-> and every property listed in `"required"`. Turn it off for schemas or backends
-> that don't comply — local Ajv validation still applies.
+The credential test and the Model dropdown both call `GET /v1/models`. Versioned
+IDs such as `jev-1.13.0` are accepted by the API even when the list only shows
+aliases — set the Model field via expression to pin one.
 
 ## Install
 
@@ -55,8 +86,8 @@ npm run build
 npm run lint
 ```
 
-`--ignore-scripts` is recommended: `n8n-workflow` pulls in `isolated-vm`, which
-needs a native build that this package does not use (it only needs the types).
+`--ignore-scripts` is recommended: `n8n-workflow` pulls in `isolated-vm`, whose
+native build this package never uses — it only needs the types.
 
 To try the node in a local n8n instance:
 

@@ -12,3 +12,8 @@ coverage/
 *.log
 npm-debug.log*
 .tokensave/
+
+# Agent skills (installed locally via `npx skills`)
+.agents/
+.claude/
+skills-lock.json

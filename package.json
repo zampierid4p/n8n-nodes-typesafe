@@ -1,13 +1,15 @@
 {
   "name": "n8n-nodes-typesafe-ai",
   "version": "0.1.0",
-  "description": "Type-safe AI community nodes for n8n: call any OpenAI-compatible model and get JSON Schema validated output",
+  "description": "n8n community node for TypeSafe System One models: ask Choice, Noul and Score questions and get calibrated, typed answers",
   "keywords": [
     "n8n-community-node-package",
     "n8n",
+    "typesafe",
+    "jev",
+    "system-one",
     "ai",
-    "llm",
-    "json-schema",
+    "classification",
     "structured-output"
   ],
   "license": "MIT",
@@ -41,15 +43,11 @@
   "n8n": {
     "n8nNodesApiVersion": 1,
     "credentials": [
-      "dist/credentials/TypesafeAiApi.credentials.js"
+      "dist/credentials/TypeSafeApi.credentials.js"
     ],
     "nodes": [
-      "dist/nodes/TypesafeAi/TypesafeAi.node.js"
+      "dist/nodes/TypeSafe/TypeSafe.node.js"
     ]
-  },
-  "dependencies": {
-    "ajv": "^8.17.1",
-    "ajv-formats": "^3.0.1"
   },
   "devDependencies": {
     "@typescript-eslint/parser": "^8.32.0",

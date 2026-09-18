@@ -5,23 +5,14 @@ import type {
 	INodeProperties,
 } from 'n8n-workflow';
 
-export class TypesafeAiApi implements ICredentialType {
-	name = 'typesafeAiApi';
+export class TypeSafeApi implements ICredentialType {
+	name = 'typeSafeApi';
 
-	displayName = 'Typesafe AI API';
+	displayName = 'TypeSafe API';
 
-	documentationUrl = 'https://github.com/zampierid4p/n8n-nodes-typesafe-ai';
+	documentationUrl = 'https://docs.typesafe.ai/api';
 
 	properties: INodeProperties[] = [
-		{
-			displayName: 'Base URL',
-			name: 'baseUrl',
-			type: 'string',
-			default: 'https://api.openai.com/v1',
-			required: true,
-			description:
-				'Base URL of any OpenAI-compatible Chat Completions API (OpenAI, Azure OpenAI, OpenRouter, Ollama, vLLM, ...)',
-		},
 		{
 			displayName: 'API Key',
 			name: 'apiKey',
@@ -29,6 +20,15 @@ export class TypesafeAiApi implements ICredentialType {
 			typeOptions: { password: true },
 			default: '',
 			required: true,
+			description: 'Your TypeSafe API key, sent as a bearer token',
+		},
+		{
+			displayName: 'Base URL',
+			name: 'baseUrl',
+			type: 'string',
+			default: 'https://api.typesafe.ai/v1',
+			required: true,
+			description: 'Root of the TypeSafe API. Change only to target a different deployment.',
 		},
 	];
 
