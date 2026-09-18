@@ -8,4 +8,4 @@ Work in progress — repository just initialized.
 
 ## License
 
-MIT
+[MIT](LICENSE) © Marco Zampieri
