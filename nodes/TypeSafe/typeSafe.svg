@@ -1,7 +1,26 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
-  <rect x="4" y="4" width="56" height="56" rx="14" fill="#101828"/>
-  <rect x="15" y="34" width="8" height="14" rx="2.5" fill="#5eead4"/>
-  <rect x="28" y="22" width="8" height="26" rx="2.5" fill="#2dd4bf"/>
-  <rect x="41" y="29" width="8" height="19" rx="2.5" fill="#0f766e"/>
-  <path d="M15 17h34" stroke="#475467" stroke-width="3" stroke-linecap="round"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="TypeSafe">
+  <style>
+    .m { fill: none; stroke: #101828; stroke-width: 3.2; stroke-linecap: round; stroke-linejoin: round; }
+    @media (prefers-color-scheme: dark) { .m { stroke: #f2f4f7; } }
+  </style>
+  <g class="m">
+    <path d="M23.66 3.1L40.34 12.73"/>
+    <path d="M40.34 12.73L40.34 32.0"/>
+    <path d="M40.34 32.0L23.66 41.63"/>
+    <path d="M23.66 41.63L6.97 32.0"/>
+    <path d="M6.97 32.0L6.97 12.73"/>
+    <path d="M6.97 12.73L23.66 3.1"/>
+    <path d="M23.66 22.37L6.97 12.73"/>
+    <path d="M23.66 22.37L40.34 12.73"/>
+    <path d="M23.66 22.37L23.66 41.63"/>
+    <path d="M40.34 22.37L57.03 32.0"/>
+    <path d="M57.03 32.0L57.03 51.27"/>
+    <path d="M57.03 51.27L40.34 60.9"/>
+    <path d="M40.34 60.9L23.66 51.27"/>
+    <path d="M23.66 51.27L23.66 32.0"/>
+    <path d="M23.66 32.0L40.34 22.37"/>
+    <path d="M40.34 41.63L23.66 32.0"/>
+    <path d="M40.34 41.63L57.03 32.0"/>
+    <path d="M40.34 41.63L40.34 60.9"/>
+  </g>
 </svg>
