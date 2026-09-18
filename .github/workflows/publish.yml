@@ -1,0 +1,90 @@
+name: Publish to npm
+
+# Publishing uses npm trusted publishing (OIDC): the job proves its identity to
+# the registry with a short-lived GitHub token, so there is no npm token stored
+# anywhere and nothing to rotate. npm must be told to trust this workflow first,
+# under the package's Settings -> Trusted publisher on npmjs.com.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Build and check everything, but do not publish
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # required to mint the OIDC token npm verifies
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+          cache: npm
+
+      # setup-node ships an npm that predates trusted publishing on some images.
+      - name: Use an npm that supports trusted publishing
+        run: |
+          npm install -g npm@latest
+          npm --version
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Build
+        run: npm run build
+
+      - name: Lint
+        run: npm run lint
+
+      # The icon and the codex file are copied by a gulp task rather than by tsc,
+      # and a build once completed with them missing. Fail here rather than ship
+      # a node with no icon.
+      - name: Check the tarball carries the icon and the codex
+        run: |
+          npm pack --silent
+          tar -tzf n8n-nodes-typesafe-*.tgz | sort > /tmp/tarball-files
+          for required in \
+            package/dist/nodes/TypeSafe/TypeSafe.node.js \
+            package/dist/nodes/TypeSafe/TypeSafe.node.json \
+            package/dist/nodes/TypeSafe/typeSafe.svg \
+            package/dist/credentials/TypeSafeApi.credentials.js
+          do
+            if ! grep -qx "$required" /tmp/tarball-files; then
+              echo "::error::$required is missing from the tarball"
+              cat /tmp/tarball-files
+              exit 1
+            fi
+          done
+          echo "all required files present"
+
+      - name: Check package.json agrees with the release tag
+        if: github.event_name == 'release'
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg="$(node -p "require('./package.json').version")"
+          if [ "$tag" != "$pkg" ]; then
+            echo "::error::release tag $tag does not match package.json version $pkg"
+            exit 1
+          fi
+          echo "version $pkg matches the tag"
+
+      - name: Publish
+        if: github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && !inputs.dry_run)
+        run: npm publish
+
+      - name: Dry run finished
+        if: github.event_name == 'workflow_dispatch' && inputs.dry_run
+        run: echo "Everything built and checked. Re-run with dry_run unchecked to publish."
