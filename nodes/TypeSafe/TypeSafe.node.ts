@@ -15,6 +15,43 @@ const CREDENTIAL = 'typeSafeApi';
 /** TypeSafe asks callers to back off on these and retry; everything else is final. */
 const RETRYABLE_STATUS_CODES = [429, 529];
 
+/**
+ * Transport failures worth retrying. These never reach the status-code check, because
+ * `httpRequestWithAuthentication` throws rather than returning a response when the
+ * socket times out or drops, so without this the retry loop is bypassed entirely and a
+ * one-off network blip fails the item.
+ */
+const RETRYABLE_ERROR_PATTERNS = [
+	'ETIMEDOUT',
+	'ESOCKETTIMEDOUT',
+	'ECONNRESET',
+	'ECONNREFUSED',
+	'EPIPE',
+	'EAI_AGAIN',
+	'ENOTFOUND',
+	'socket hang up',
+	'timeout',
+	'timed out',
+	'network',
+];
+
+/** Whether a thrown request error looks like a transport failure rather than a rejection. */
+function isRetryableTransportError(error: unknown): boolean {
+	const parts = [
+		(error as { code?: unknown })?.code,
+		(error as { cause?: { code?: unknown } })?.cause?.code,
+		(error as { message?: unknown })?.message,
+		(error as { cause?: { message?: unknown } })?.cause?.message,
+	]
+		.filter((part): part is string | number => part !== undefined && part !== null)
+		.map((part) => String(part).toLowerCase());
+
+	if (parts.length === 0) return false;
+	return RETRYABLE_ERROR_PATTERNS.some((pattern) =>
+		parts.some((part) => part.includes(pattern.toLowerCase())),
+	);
+}
+
 type QuestionType = 'choice' | 'noul' | 'score';
 
 type Criteria = string[] | Record<string, string | null> | { true?: string; false?: string };
@@ -389,7 +426,7 @@ export class TypeSafe implements INodeType {
 						typeOptions: { minValue: 0, maxValue: 10 },
 						default: 3,
 						description:
-							'How many times to retry when TypeSafe returns 429 Too Many Requests or 529 Overloaded. Waits use the retry-after header when present, otherwise exponential backoff.',
+							'How many times to retry when TypeSafe returns 429 Too Many Requests or 529 Overloaded, or when the request times out or the connection drops. Waits use the retry-after header when present, otherwise exponential backoff.',
 					},
 					{
 						displayName: 'Put Output in Field',
@@ -591,18 +628,30 @@ export class TypeSafe implements INodeType {
 				let response: SystemOneResponse | undefined;
 
 				for (let attempt = 0; ; attempt++) {
-					const httpResponse = (await this.helpers.httpRequestWithAuthentication.call(
-						this,
-						CREDENTIAL,
-						{
-							method: 'POST',
-							url: `${baseUrl}/systemone`,
-							body: { state, model, questions },
-							json: true,
-							returnFullResponse: true,
-							ignoreHttpStatusErrors: true,
-						},
-					)) as { statusCode: number; headers: IDataObject; body: unknown };
+					let httpResponse: { statusCode: number; headers: IDataObject; body: unknown };
+
+					try {
+						httpResponse = (await this.helpers.httpRequestWithAuthentication.call(
+							this,
+							CREDENTIAL,
+							{
+								method: 'POST',
+								url: `${baseUrl}/systemone`,
+								body: { state, model, questions },
+								json: true,
+								returnFullResponse: true,
+								ignoreHttpStatusErrors: true,
+							},
+						)) as { statusCode: number; headers: IDataObject; body: unknown };
+					} catch (error) {
+						// A timed-out or dropped connection throws instead of returning a
+						// status, so it has to be caught here to reach the same backoff as a
+						// 429. Anything that is not a transport failure is a real rejection
+						// and is rethrown untouched.
+						if (attempt >= maxRetries || !isRetryableTransportError(error)) throw error;
+						await sleep(2 ** attempt * 500);
+						continue;
+					}
 
 					if (httpResponse.statusCode >= 200 && httpResponse.statusCode < 300) {
 						response = httpResponse.body as SystemOneResponse;
