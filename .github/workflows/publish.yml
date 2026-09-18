@@ -28,10 +28,12 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # No registry-url here on purpose: it makes setup-node write an .npmrc
+      # with _authToken=${NODE_AUTH_TOKEN}, and that placeholder is sent to the
+      # registry as a real token, which shadows trusted publishing.
       - uses: actions/setup-node@v5
         with:
           node-version: 22
-          registry-url: https://registry.npmjs.org
           cache: npm
 
       # setup-node ships an npm that predates trusted publishing on some images.
@@ -39,6 +41,15 @@ jobs:
         run: |
           npm install -g npm@latest
           npm --version
+
+      - name: Check the OIDC token is available
+        run: |
+          npm --version
+          if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
+            echo "::error::ACTIONS_ID_TOKEN_REQUEST_URL is unset - id-token: write was not granted, so trusted publishing cannot work"
+            exit 1
+          fi
+          echo "OIDC token endpoint present"
 
       - name: Install dependencies
         run: npm ci --ignore-scripts
