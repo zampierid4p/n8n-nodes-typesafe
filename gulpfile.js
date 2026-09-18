@@ -3,14 +3,24 @@ const { task, src, dest } = require('gulp');
 
 task('build:icons', copyIcons);
 
+/** Resolves once a vinyl stream has finished writing. */
+function finished(stream) {
+	return new Promise((resolve, reject) => {
+		stream.on('finish', resolve).on('end', resolve).on('error', reject);
+	});
+}
+
 function copyIcons() {
-	const nodeSource = path.resolve('nodes', '**', '*.{png,svg,json}');
-	const nodeDestination = path.resolve('dist', 'nodes');
+	const nodes = src(path.resolve('nodes', '**', '*.{png,svg,json}'), { encoding: false }).pipe(
+		dest(path.resolve('dist', 'nodes')),
+	);
 
-	src(nodeSource, { encoding: false }).pipe(dest(nodeDestination));
+	const credentials = src(path.resolve('credentials', '**', '*.{png,svg,json}'), {
+		encoding: false,
+		allowEmpty: true,
+	}).pipe(dest(path.resolve('dist', 'credentials')));
 
-	const credSource = path.resolve('credentials', '**', '*.{png,svg,json}');
-	const credDestination = path.resolve('dist', 'credentials');
-
-	return src(credSource, { encoding: false, allowEmpty: true }).pipe(dest(credDestination));
+	// Both streams must be awaited: returning only one lets gulp report the task
+	// as done while the other is still copying, which left dist/ without icons.
+	return Promise.all([finished(nodes), finished(credentials)]);
 }
