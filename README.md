@@ -1,4 +1,4 @@
-# n8n-nodes-typesafe-ai
+# n8n-nodes-typesafe
 
 [n8n](https://n8n.io) community node for [TypeSafe](https://docs.typesafe.ai)
 System One models. Ask **typed questions** about your data and get back calibrated
@@ -74,6 +74,10 @@ The credential test and the Model dropdown both call `GET /v1/models`. Versioned
 IDs such as `jev-1.13.0` are accepted by the API even when the list only shows
 aliases — set the Model field via expression to pin one.
 
+> Community node, not affiliated with or endorsed by TypeSafe. "TypeSafe", "Jev"
+> and the TypeSafe logo belong to TypeSafe; this package only talks to their
+> public API. The MIT licence covers this package's own code.
+
 ## Install
 
 In n8n: **Settings → Community nodes → Install** → `n8n-nodes-typesafe-ai`.
@@ -95,7 +99,7 @@ To try the node in a local n8n instance:
 npm run build && npm link
 ```
 
-then `npm link n8n-nodes-typesafe-ai` inside `~/.n8n/custom` and restart n8n.
+then `npm link n8n-nodes-typesafe` inside `~/.n8n/custom` and restart n8n.
 
 ## License
 
