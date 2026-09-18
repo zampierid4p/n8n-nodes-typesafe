@@ -1,0 +1,18 @@
+{
+	"node": "n8n-nodes-base.typesafeAi",
+	"nodeVersion": "1.0",
+	"codexVersion": "1.0",
+	"categories": ["AI", "Development"],
+	"resources": {
+		"credentialDocumentation": [
+			{
+				"url": "https://github.com/zampierid4p/n8n-nodes-typesafe-ai"
+			}
+		],
+		"primaryDocumentation": [
+			{
+				"url": "https://github.com/zampierid4p/n8n-nodes-typesafe-ai#readme"
+			}
+		]
+	}
+}

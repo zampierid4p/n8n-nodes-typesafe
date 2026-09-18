@@ -1,0 +1,67 @@
+{
+  "name": "n8n-nodes-typesafe-ai",
+  "version": "0.1.0",
+  "description": "Type-safe AI community nodes for n8n: call any OpenAI-compatible model and get JSON Schema validated output",
+  "keywords": [
+    "n8n-community-node-package",
+    "n8n",
+    "ai",
+    "llm",
+    "json-schema",
+    "structured-output"
+  ],
+  "license": "MIT",
+  "homepage": "https://github.com/zampierid4p/n8n-nodes-typesafe-ai",
+  "author": {
+    "name": "Marco Zampieri",
+    "email": "marco.zampieri@data4prime.com"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zampierid4p/n8n-nodes-typesafe-ai.git"
+  },
+  "bugs": {
+    "url": "https://github.com/zampierid4p/n8n-nodes-typesafe-ai/issues"
+  },
+  "engines": {
+    "node": ">=20.15"
+  },
+  "main": "index.js",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "npx rimraf dist && tsc && gulp build:icons",
+    "dev": "tsc --watch",
+    "format": "prettier nodes credentials --write",
+    "lint": "eslint nodes credentials package.json",
+    "lintfix": "eslint nodes credentials package.json --fix",
+    "prepublishOnly": "npm run build && npm run lint"
+  },
+  "n8n": {
+    "n8nNodesApiVersion": 1,
+    "credentials": [
+      "dist/credentials/TypesafeAiApi.credentials.js"
+    ],
+    "nodes": [
+      "dist/nodes/TypesafeAi/TypesafeAi.node.js"
+    ]
+  },
+  "dependencies": {
+    "ajv": "^8.17.1",
+    "ajv-formats": "^3.0.1"
+  },
+  "devDependencies": {
+    "@typescript-eslint/parser": "^8.32.0",
+    "eslint": "^8.57.0",
+    "eslint-plugin-n8n-nodes-base": "^1.16.3",
+    "gulp": "^5.0.0",
+    "n8n-workflow": "^2.16.0",
+    "prettier": "^3.5.3",
+    "rimraf": "^6.0.1",
+    "typescript": "^5.8.3"
+  },
+  "peerDependencies": {
+    "n8n-workflow": "*"
+  }
+}
