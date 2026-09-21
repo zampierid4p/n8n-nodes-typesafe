@@ -38,7 +38,8 @@
     "format": "prettier nodes credentials --write",
     "lint": "eslint nodes credentials package.json",
     "lintfix": "eslint nodes credentials package.json --fix",
-    "prepublishOnly": "npm run build && npm run lint"
+    "prepublishOnly": "npm run build && npm run lint",
+    "test": "npm run build && node --test \"test/**/*.test.js\""
   },
   "n8n": {
     "n8nNodesApiVersion": 1,
