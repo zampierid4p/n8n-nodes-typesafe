@@ -55,13 +55,20 @@ It is off by default on purpose: it discards the probabilities and confidence th
 tell you whether a judgment is safe to act on. See
 [Confidence](https://docs.typesafe.ai/confidence.md) before turning it on.
 
-### Answer types are checked
+### Answers are checked against the question
 
-The node knows which type it asked each question as, and compares that with the
-type of the answer before reading any value. A mismatch, or an answer for a
-question that was never asked, fails the item with an error naming the question,
-rather than letting a string reach a downstream numeric comparison and quietly
-evaluate false.
+The node knows what it asked, and checks every answer against that before reading
+a value:
+
+- the answer's **type** must match the question — a noul answered as a choice fails
+- its **value** must be usable — a noul is a number from 0 to 1, a choice is one of
+  the options you listed, a score is a number between your first and last level
+- an answer for a question that was never asked fails too
+
+A failed check fails the item with an error naming the question, rather than
+letting `"0.9"` as a string, or a missing value, reach a downstream comparison and
+quietly evaluate false. With *Continue On Fail* that item arrives as `{ error }`,
+which the [guardrail example](docs/guardrail-example.md) routes to review.
 
 ### Output mode
 

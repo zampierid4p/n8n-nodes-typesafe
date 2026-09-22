@@ -285,3 +285,57 @@ test('does not blame one retry-after when the budget ran out across several', as
 	assert.doesNotMatch(message, /exceeds/i);
 	assert.match(message, /last retry-after: 5s/);
 });
+
+// Value validation. The type check alone let {"type":"noul","noul":"0.9"} through: the
+// right label carrying a string into a downstream numeric comparison, which is the bug in
+// #3 reached by a different road. Each case gets its own test because run() enables
+// fake timers.
+
+const CHOICE_QUESTIONS = {
+	questions: {
+		question: [
+			{ id: 'verdict', defineAsJson: false, type: 'choice', instructions: 'i', choiceCriteria: 'yes = a\nno = b' },
+		],
+	},
+};
+const SCORE_QUESTIONS = {
+	questions: {
+		question: [
+			{ id: 'verdict', defineAsJson: false, type: 'score', instructions: 'i', scoreCriteria: 'Low\nMid\nHigh' },
+		],
+	},
+};
+const answering = (verdict) => [{ status: 200, body: { ...OK_BODY, answers: { verdict } } }];
+
+const REJECTED = [
+	['a noul with no value', {}, { type: 'noul' }],
+	['a noul of null', {}, { type: 'noul', noul: null }],
+	['a noul sent as a string', {}, { type: 'noul', noul: '0.9' }],
+	['a noul above 1', {}, { type: 'noul', noul: 1.2 }],
+	['a choice outside the options asked', CHOICE_QUESTIONS, { type: 'choice', choice: 'maybe' }],
+	['a choice that is not a string', CHOICE_QUESTIONS, { type: 'choice', choice: 1 }],
+	['a score above the last level', SCORE_QUESTIONS, { type: 'score', score: 3.5 }],
+	['a score sent as a string', SCORE_QUESTIONS, { type: 'score', score: '1' }],
+];
+for (const [label, overrides, verdict] of REJECTED) {
+	test(`rejects ${label}`, async (t) => {
+		const result = await run(t, answering(verdict), overrides);
+		assert.equal(result.ok, false, 'should fail the item rather than emit the value');
+		assert.match(String(result.error.message), /without a usable value/);
+	});
+}
+
+// The other side: validation strict enough to reject good answers would be its own bug.
+const ACCEPTED = [
+	['a noul of exactly 0', {}, { type: 'noul', noul: 0 }],
+	['a noul of exactly 1', {}, { type: 'noul', noul: 1 }],
+	['a choice among the options', CHOICE_QUESTIONS, { type: 'choice', choice: 'no', probabilities: {}, confidence: 0.8 }],
+	['a score between two levels', SCORE_QUESTIONS, { type: 'score', score: 1.6, legend: {}, probabilities: {}, confidence: 0.7 }],
+	['a score on the last level', SCORE_QUESTIONS, { type: 'score', score: 2, legend: {}, probabilities: {}, confidence: 0.9 }],
+];
+for (const [label, overrides, verdict] of ACCEPTED) {
+	test(`accepts ${label}`, async (t) => {
+		const result = await run(t, answering(verdict), overrides);
+		assert.equal(result.ok, true, result.error && result.error.message);
+	});
+}

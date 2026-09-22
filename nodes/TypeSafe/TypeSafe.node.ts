@@ -159,6 +159,59 @@ function parseChoiceCriteria(value: string | undefined): Record<string, string |
 	return criteria;
 }
 
+/** How a value is shown in an error: numbers as themselves, so NaN is not rendered as null. */
+function describeValue(value: unknown): string {
+	if (value === undefined) return 'missing';
+	if (typeof value === 'number') return String(value);
+	return JSON.stringify(value);
+}
+
+/**
+ * Why an answer's value cannot be used for the question it answers, or undefined when it
+ * can. Checking the declared type alone is not enough: {"type":"noul","noul":"0.9"} has the
+ * right label and still puts a string into a downstream numeric comparison, where it
+ * quietly evaluates false. A small tolerance absorbs floating-point error at the bounds.
+ */
+function answerValueProblem(question: Question, answer: Answer): string | undefined {
+	const TOLERANCE = 1e-9;
+
+	if (answer.type === 'noul') {
+		const value: unknown = answer.noul;
+		if (typeof value !== 'number' || !Number.isFinite(value)) {
+			return `noul is ${describeValue(value)}, not a number`;
+		}
+		if (value < -TOLERANCE || value > 1 + TOLERANCE) return `noul is ${value}, outside 0 to 1`;
+		return undefined;
+	}
+
+	if (answer.type === 'choice') {
+		const value: unknown = answer.choice;
+		if (typeof value !== 'string') return `choice is ${describeValue(value)}, not a string`;
+		const criteria = question.criteria;
+		if (criteria !== null && typeof criteria === 'object' && !Array.isArray(criteria)) {
+			const options = Object.keys(criteria);
+			if (options.length > 0 && !options.includes(value)) {
+				return `choice "${value}" is not one of the options asked (${options.join(', ')})`;
+			}
+		}
+		return undefined;
+	}
+
+	const value: unknown = answer.score;
+	if (typeof value !== 'number' || !Number.isFinite(value)) {
+		return `score is ${describeValue(value)}, not a number`;
+	}
+	// A score is probability-weighted across the levels, so it can fall between two of
+	// them but never outside the first and last.
+	if (Array.isArray(question.criteria) && question.criteria.length > 0) {
+		const top = question.criteria.length - 1;
+		if (value < -TOLERANCE || value > top + TOLERANCE) {
+			return `score is ${value}, outside the levels 0 to ${top}`;
+		}
+	}
+	return undefined;
+}
+
 /** The scalar a caller usually wants out of an answer. */
 function answerValue(answer: Answer): number | string {
 	if (answer.type === 'noul') return answer.noul;
@@ -747,6 +800,13 @@ export class TypeSafe implements INodeType {
 						throw new NodeApiError(this.getNode(), answers as unknown as JsonObject, {
 							itemIndex,
 							message: `Question "${id}" was asked as a ${asked} but TypeSafe answered with type "${got ?? 'missing'}"`,
+						});
+					}
+					const problem = answerValueProblem(questions[id], answer as Answer);
+					if (problem !== undefined) {
+						throw new NodeApiError(this.getNode(), answers as unknown as JsonObject, {
+							itemIndex,
+							message: `Question "${id}" came back without a usable value: ${problem}`,
 						});
 					}
 				}
