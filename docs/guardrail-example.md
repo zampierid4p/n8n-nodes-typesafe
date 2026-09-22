@@ -46,15 +46,27 @@ const BLOCK_AT = 0.5;
 const SEVERITY_BLOCK = 2.5;
 const JAILBREAK_AT = 0.5;
 
+const REQUIRED = ['unsafe', 'jailbreak', 'severity', 'reason'];
+
 return $input.all().map((item) => {
   // With Simplify off and a single output, the node returns { model, answers, usage },
   // so the answers are nested rather than spread onto the item.
-  const answers = item.json.answers ?? {};
-  const unsafe = answers.unsafe?.noul ?? 0;
-  const jailbreak = answers.jailbreak?.noul ?? 0;
-  const severity = answers.severity?.score ?? 0;
-  const category = answers.reason?.choice ?? 'unclear';
-  const categoryConfidence = answers.reason?.confidence ?? 0;
+  const answers = item.json.answers;
+
+  // No answers at all means the request failed; a missing id means a question went
+  // unanswered. Either way there is nothing to judge the prompt on, so a person does.
+  // Reading a missing signal as zero would send it to pass, which turns an outage into
+  // an open gate.
+  const missing = answers ? REQUIRED.filter((id) => answers[id] === undefined) : REQUIRED;
+  if (missing.length > 0) {
+    return { json: { decision: 'review', missing, error: item.json.error ?? null } };
+  }
+
+  const unsafe = answers.unsafe.noul;
+  const jailbreak = answers.jailbreak.noul;
+  const severity = answers.severity.score;
+  const category = answers.reason.choice;
+  const categoryConfidence = answers.reason.confidence;
 
   let decision = 'pass';
   if (category === 'self_harm' && unsafe >= REVIEW_AT) decision = 'support';
@@ -75,6 +87,12 @@ return $input.all().map((item) => {
 ```
 
 Attach the Switch to `{{ $json.decision }}` and give it one output per value.
+
+**A missing signal goes to review, not pass.** If the API call fails and the TypeSafe node
+has Continue On Fail set, the item arrives as `{ error }` with no answers at all; a
+question can also go unanswered on its own. Reading either as a zero would route it to
+pass, so an outage would quietly open the gate. The check is explicit instead, and the
+item carries which signals were missing so the queue can show why.
 
 ## Notes
 
