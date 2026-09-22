@@ -1,7 +1,9 @@
 /**
  * Drives the compiled node's execute() against a scripted HTTP helper.
  *
- * Uses node:test and node:assert only, so the package keeps its no-dependency rule.
+ * Uses node:test and node:assert, plus n8n-workflow (already a devDependency) in the one
+ * test that pins how n8n decides whether to show a parameter. Nothing is added to the
+ * package's runtime dependencies.
  * Timers are faked, which lets the retry waits be asserted exactly without the suite
  * spending real seconds asleep.
  *
@@ -42,13 +44,20 @@ const BASE_PARAMS = {
 function makeContext(script, overrides = {}) {
 	const params = { ...BASE_PARAMS, ...overrides };
 	const calls = [];
+	const bodies = [];
 	return {
 		calls,
+		bodies,
 		getInputData: () => [{ json: {} }],
 		getNode: () => ({ name: 'TypeSafe', type: 'n8n-nodes-typesafe.typeSafe', typeVersion: 1 }),
 		getCredentials: async () => ({ apiKey: 'test', baseUrl: 'https://api.typesafe.ai/v1' }),
 		continueOnFail: () => false,
-		getNodeParameter: (name, _itemIndex, fallback) => {
+		getNodeParameter: (name, _itemIndex, fallback, options) => {
+			// n8n hands back an expression unresolved when asked for rawExpressions; __raw
+			// stands in for that, so a test can model JSON that arrives from an expression.
+			if (options && options.rawExpressions && params.__raw && name in params.__raw) {
+				return params.__raw[name];
+			}
 			let node = params;
 			for (const key of String(name).split('.')) {
 				if (node === undefined || node === null) return fallback;
@@ -57,9 +66,10 @@ function makeContext(script, overrides = {}) {
 			return node === undefined ? fallback : node;
 		},
 		helpers: {
-			httpRequestWithAuthentication: async () => {
+			httpRequestWithAuthentication: async (_credential, request) => {
 				const step = script[Math.min(calls.length, script.length - 1)];
 				calls.push(Date.now());
+				bodies.push(request && request.body);
 				if (step.throws) {
 					const error = new Error(step.throws.message ?? 'failed');
 					if (step.throws.code) error.code = step.throws.code;
@@ -118,7 +128,7 @@ async function run(t, script, overrides) {
 	await pending;
 
 	const waits = context.calls.slice(1).map((at, i) => at - context.calls[i]);
-	return { ...outcome, attempts: context.calls.length, waits };
+	return { ...outcome, attempts: context.calls.length, waits, bodies: context.bodies };
 }
 
 test('returns the answers on the happy path', async (t) => {
@@ -339,3 +349,168 @@ for (const [label, overrides, verdict] of ACCEPTED) {
 		assert.equal(result.ok, true, result.error && result.error.message);
 	});
 }
+
+// ---------------------------------------------------------------------------------------
+// Questions described as one JSON object, in the shape of the API's questions field.
+
+const JSON_QUESTIONS = {
+	is_urgent: { type: 'noul', instructions: 'Does this convey urgency?' },
+	department: {
+		type: 'choice',
+		instructions: 'Which team should handle this?',
+		criteria: { billing: 'Payments', technical: 'Bugs', sales: null },
+	},
+	frustration: {
+		type: 'score',
+		instructions: 'How frustrated is the customer?',
+		criteria: ['Calm', 'Frustrated', 'Very angry'],
+	},
+};
+const JSON_ANSWERS = {
+	is_urgent: { type: 'noul', noul: 0.92 },
+	department: { type: 'choice', choice: 'technical', probabilities: {}, confidence: 0.82 },
+	frustration: { type: 'score', score: 1.6, legend: {}, probabilities: {}, confidence: 0.78 },
+};
+const answeringAll = [{ status: 200, body: { ...OK_BODY, answers: JSON_ANSWERS } }];
+const fromJson = (questionsJson, extra = {}) => ({
+	questionsSource: 'json',
+	questionsJson,
+	...extra,
+});
+
+test('JSON source sends the questions exactly as written', async (t) => {
+	const result = await run(t, answeringAll, fromJson(JSON.stringify(JSON_QUESTIONS)));
+	assert.equal(result.ok, true, result.error && result.error.message);
+	assert.deepEqual(result.bodies[0].questions, JSON_QUESTIONS);
+});
+
+test('JSON source accepts an object, as an expression resolves to', async (t) => {
+	const result = await run(t, answeringAll, fromJson(JSON_QUESTIONS));
+	assert.equal(result.ok, true, result.error && result.error.message);
+	assert.deepEqual(result.bodies[0].questions, JSON_QUESTIONS);
+});
+
+const JSON_REJECTED = [
+	['text that is not JSON', '{ not json', /is not valid JSON/],
+	['an array', JSON.stringify([JSON_QUESTIONS.is_urgent]), /object keyed by question ID/],
+	['an empty object', '{}', /at least one question/],
+	['an unknown type', JSON.stringify({ q: { type: 'yesno', instructions: 'i' } }), /use noul, choice or score/],
+	['no instructions', JSON.stringify({ q: { type: 'noul' } }), /needs instructions/],
+	['blank instructions', JSON.stringify({ q: { type: 'noul', instructions: '  ' } }), /needs instructions/],
+	['a choice with one option', JSON.stringify({ q: { type: 'choice', instructions: 'i', criteria: { a: null } } }), /at least two options/],
+	['a choice whose criteria is an array', JSON.stringify({ q: { type: 'choice', instructions: 'i', criteria: ['a', 'b'] } }), /at least two options/],
+	['a score with one level', JSON.stringify({ q: { type: 'score', instructions: 'i', criteria: ['only'] } }), /at least two levels/],
+	['a score whose criteria is an object', JSON.stringify({ q: { type: 'score', instructions: 'i', criteria: { a: 1, b: 2 } } }), /at least two levels/],
+	['a noul whose criteria is a string', JSON.stringify({ q: { type: 'noul', instructions: 'i', criteria: 'yes' } }), /not an object/],
+	['a question that is not an object', JSON.stringify({ q: 'Is it urgent?' }), /must be an object/],
+];
+for (const [label, questionsJson, expected] of JSON_REJECTED) {
+	test(`JSON source rejects ${label}`, async (t) => {
+		const result = await run(t, answeringAll, fromJson(questionsJson));
+		assert.equal(result.ok, false);
+		assert.equal(result.attempts, 0, 'a bad definition must fail before any request is made');
+		assert.match(String(result.error.message), expected);
+	});
+}
+
+test('JSON source accepts structured instructions, as the API does', async (t) => {
+	const questions = { verdict: { type: 'noul', instructions: { task: 'judge', focus: ['tone'] } } };
+	const result = await run(t, [{ status: 200, body: OK_BODY }], fromJson(JSON.stringify(questions)));
+	assert.equal(result.ok, true, result.error && result.error.message);
+});
+
+// Define as JSON on a single question used to check only that type and instructions
+// existed, so "yesno" or a one-option choice went on to the API.
+const PER_QUESTION_REJECTED = [
+	['an unknown type', { type: 'yesno', instructions: 'i' }, /use noul, choice or score/],
+	['a choice with one option', { type: 'choice', instructions: 'i', criteria: { a: null } }, /at least two options/],
+];
+for (const [label, definition, expected] of PER_QUESTION_REJECTED) {
+	test(`Define as JSON rejects ${label}`, async (t) => {
+		const overrides = {
+			questions: { question: [{ id: 'verdict', defineAsJson: true, questionJson: JSON.stringify(definition) }] },
+		};
+		const result = await run(t, [{ status: 200, body: OK_BODY }], overrides);
+		assert.equal(result.ok, false);
+		assert.equal(result.attempts, 0);
+		assert.match(String(result.error.message), expected);
+	});
+}
+
+test('one output per question takes its branches from JSON written in the node', async (t) => {
+	const result = await run(
+		t,
+		answeringAll,
+		fromJson(JSON.stringify(JSON_QUESTIONS), { outputMode: 'perQuestion' }),
+	);
+	assert.equal(result.ok, true, result.error && result.error.message);
+	assert.equal(result.data.length, 3, 'one branch per key');
+	assert.deepEqual(
+		result.data.map((branch) => branch[0].json.questionId),
+		['is_urgent', 'department', 'frustration'],
+		'branches follow the order of the keys',
+	);
+});
+
+test('one output per question falls back to one output when the JSON is an expression', async (t) => {
+	const result = await run(
+		t,
+		answeringAll,
+		fromJson(JSON_QUESTIONS, {
+			outputMode: 'perQuestion',
+			__raw: { questionsJson: '={{ $json.questions }}' },
+		}),
+	);
+	assert.equal(result.ok, true, result.error && result.error.message);
+	assert.equal(result.data.length, 1, 'the editor can only draw one output here');
+	assert.deepEqual(Object.keys(result.data[0][0].json.answers), Object.keys(JSON_QUESTIONS));
+});
+
+// ---------------------------------------------------------------------------------------
+// The editor side. The outputs expression draws the connectors and the notice explains the
+// fallback; neither runs inside execute(), so they are tested directly.
+
+/** Evaluates the node's outputs expression the way n8n does, with $parameter in scope. */
+function drawnOutputs(parameters) {
+	const expression = new TypeSafe().description.outputs;
+	const body = expression.replace(/^=\{\{/, '').replace(/\}\}$/, '');
+	return new Function('$parameter', `return (${body});`)(parameters).map(
+		(output) => output.displayName ?? 'main',
+	);
+}
+
+test('outputs expression labels the branches with the JSON keys', () => {
+	assert.deepEqual(
+		drawnOutputs({ outputMode: 'perQuestion', questionsSource: 'json', questionsJson: JSON.stringify(JSON_QUESTIONS) }),
+		['is_urgent', 'department', 'frustration'],
+	);
+});
+
+for (const [label, questionsJson] of [
+	['an expression', '={{ $json.questions }}'],
+	['invalid JSON', '{ not json'],
+	['an array', '[]'],
+	['an empty object', '{}'],
+]) {
+	test(`outputs expression draws one output for ${label}`, () => {
+		assert.deepEqual(
+			drawnOutputs({ outputMode: 'perQuestion', questionsSource: 'json', questionsJson }),
+			['main'],
+		);
+	});
+}
+
+test('the notice about expressions appears only when it applies', () => {
+	// This rests on n8n's own rule for displayOptions: once a watched field holds an
+	// expression, the parameter is shown without checking the rules after it. If an n8n
+	// upgrade changes that, this is the test that says so.
+	const { NodeHelpers } = require('n8n-workflow');
+	const notice = new TypeSafe().description.properties.find((p) => p.name === 'dynamicJsonNotice');
+	const shown = (values) => NodeHelpers.displayParameter(values, notice, null, null);
+	const expression = '={{ $json.questions }}';
+
+	assert.equal(shown({ outputMode: 'perQuestion', questionsSource: 'json', questionsJson: expression }), true);
+	assert.equal(shown({ outputMode: 'perQuestion', questionsSource: 'json', questionsJson: '{"a":{}}' }), false);
+	assert.equal(shown({ outputMode: 'single', questionsSource: 'json', questionsJson: expression }), false);
+	assert.equal(shown({ outputMode: 'perQuestion', questionsSource: 'fields', questionsJson: expression }), false);
+});

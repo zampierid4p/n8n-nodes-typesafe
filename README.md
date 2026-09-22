@@ -55,6 +55,43 @@ It is off by default on purpose: it discards the probabilities and confidence th
 tell you whether a judgment is safe to act on. See
 [Confidence](https://docs.typesafe.ai/confidence.md) before turning it on.
 
+### Questions as JSON
+
+Set **Questions Source** to *JSON* to describe every question in one object, in
+the same shape as the `questions` field of the TypeSafe API — so questions can be
+pasted straight from its docs and cookbooks:
+
+```json
+{
+  "is_urgent":   { "type": "noul",   "instructions": "Does this convey urgency?" },
+  "department":  { "type": "choice", "instructions": "Which team should handle this?",
+                   "criteria": { "billing": "Payments", "technical": "Bugs", "sales": null } },
+  "frustration": { "type": "score",  "instructions": "How frustrated is the customer?",
+                   "criteria": ["Calm", "Frustrated", "Very angry"] }
+}
+```
+
+The key is the question ID. The JSON can be written in the node, or come from an
+expression such as `{{ $json.questions }}` to ask different questions for each item.
+
+With **One Output per Question**, the branches come from the keys of JSON written
+in the node, in key order. JSON from an expression is only known once the node
+runs, so the editor cannot draw its branches: the node shows one output, runs as
+*Single Output*, and a notice says so.
+
+Every question is checked the same way however it is written — fields, *Define as
+JSON* on one question, or the whole object: a `type` of `noul`, `choice` or
+`score`, non-empty `instructions`, a choice with at least two options, a score
+with at least two levels. A definition that fails is rejected before any request
+is sent.
+
+Two things JSON does that you might not expect:
+
+- **A repeated key is dropped silently.** JSON parsing keeps the last of two equal
+  keys, so one question disappears without an error.
+- **Numeric keys come first.** JavaScript orders keys like `"2"` or `"10"` ahead of
+  the others, whatever order you wrote them in, and branch order follows.
+
 ### Answers are checked against the question
 
 The node knows what it asked, and checks every answer against that before reading

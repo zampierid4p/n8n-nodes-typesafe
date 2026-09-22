@@ -159,6 +159,51 @@ function parseChoiceCriteria(value: string | undefined): Record<string, string |
 	return criteria;
 }
 
+const QUESTION_TYPES = ['noul', 'choice', 'score'];
+
+/**
+ * Why a question definition would be refused, or undefined when it is usable. One set of
+ * rules for every way of defining questions -- the fields, one question as JSON, or the
+ * whole map as JSON -- so a definition that reaches the API has been held to the same
+ * standard whichever way it was written. The value checks on answers rely on it too: an
+ * answer can only be tested against the options asked if the options were well formed.
+ */
+function questionProblem(question: unknown): string | undefined {
+	if (question === null || typeof question !== 'object' || Array.isArray(question)) {
+		return 'must be an object with "type" and "instructions"';
+	}
+	const { type, instructions, criteria } = question as {
+		type?: unknown;
+		instructions?: unknown;
+		criteria?: unknown;
+	};
+
+	if (typeof type !== 'string' || !QUESTION_TYPES.includes(type)) {
+		return `has type ${describeValue(type)}; use noul, choice or score`;
+	}
+	// The API takes a string, an object or an array here; only an absent or blank one is wrong.
+	if (
+		instructions === undefined ||
+		instructions === null ||
+		(typeof instructions === 'string' && instructions.trim().length === 0)
+	) {
+		return 'needs instructions';
+	}
+
+	const isPlainObject = criteria !== null && typeof criteria === 'object' && !Array.isArray(criteria);
+
+	if (type === 'choice' && (!isPlainObject || Object.keys(criteria as object).length < 2)) {
+		return 'needs "criteria" as an object with at least two options';
+	}
+	if (type === 'score' && (!Array.isArray(criteria) || criteria.length < 2)) {
+		return 'needs "criteria" as an array of at least two levels';
+	}
+	if (type === 'noul' && criteria !== undefined && !isPlainObject) {
+		return 'has "criteria" that is not an object with "true" and/or "false"';
+	}
+	return undefined;
+}
+
 /** How a value is shown in an error: numbers as themselves, so NaN is not rendered as null. */
 function describeValue(value: unknown): string {
 	if (value === undefined) return 'missing';
@@ -225,17 +270,50 @@ function answerValue(answer: Answer): number | string {
  * free of optional chaining or template literals that would not survive being
  * turned back into source.
  */
+/**
+ * How many questions a JSON definition holds, or 0 when it cannot be read. The runtime
+ * twin of the JSON branch in configuredOutputs: both must reach the same count from the
+ * same value, because one draws the outputs and the other fills them.
+ */
+function countJsonQuestions(value: unknown): number {
+	try {
+		const parsed = typeof value === 'string' ? JSON.parse(value) : value;
+		return parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)
+			? Object.keys(parsed).length
+			: 0;
+	} catch {
+		return 0;
+	}
+}
+
 const configuredOutputs = (parameters: IDataObject) => {
 	const single = [{ type: 'main' }];
 	if (parameters.outputMode !== 'perQuestion') return single;
 
-	const collection = parameters.questions as IDataObject | undefined;
-	const questions =
-		collection && Array.isArray(collection.question) ? (collection.question as IDataObject[]) : [];
-	if (questions.length === 0) return single;
+	let ids: string[] = [];
+	if (parameters.questionsSource === 'json') {
+		let parsed: unknown = parameters.questionsJson;
+		if (typeof parsed === 'string') {
+			// An expression is only resolved when the node runs, so the editor cannot know
+			// how many questions it will produce. One output, and a notice says why.
+			if (parsed.charAt(0) === '=') return single;
+			try {
+				parsed = JSON.parse(parsed);
+			} catch {
+				return single;
+			}
+		}
+		if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return single;
+		ids = Object.keys(parsed as object);
+	} else {
+		const collection = parameters.questions as IDataObject | undefined;
+		const questions =
+			collection && Array.isArray(collection.question) ? (collection.question as IDataObject[]) : [];
+		ids = questions.map((question) => (typeof question.id === 'string' ? question.id.trim() : ''));
+	}
+	if (ids.length === 0) return single;
 
-	return questions.map((question, index) => {
-		const id = typeof question.id === 'string' ? question.id.trim() : '';
+	return ids.map((id, index) => {
 		const named = id.length > 0 && id.charAt(0) !== '=';
 		return { type: 'main', displayName: named ? id : 'Question ' + (index + 1) };
 	});
@@ -357,10 +435,34 @@ export class TypeSafe implements INodeType {
 				description: 'The content to evaluate, as a JSON object or array',
 			},
 			{
+				displayName: 'Questions Source',
+				name: 'questionsSource',
+				type: 'options',
+				noDataExpression: true,
+				options: [
+					{
+						name: 'Fields',
+						value: 'fields',
+						description: 'Add each question with its own fields',
+					},
+					{
+						name: 'JSON',
+						value: 'json',
+						description:
+							'Describe every question in one JSON object, in the same shape as the API questions field',
+					},
+				],
+				default: 'fields',
+				description: 'How the questions are described',
+			},
+			{
 				displayName: 'Questions',
 				name: 'questions',
 				placeholder: 'Add Question',
 				type: 'fixedCollection',
+				displayOptions: {
+					show: { questionsSource: ['fields'] },
+				},
 				typeOptions: {
 					multipleValues: true,
 					sortable: true,
@@ -494,6 +596,36 @@ export class TypeSafe implements INodeType {
 				],
 			},
 			{
+				displayName: 'Questions (JSON)',
+				name: 'questionsJson',
+				type: 'json',
+				typeOptions: { rows: 14 },
+				default:
+					'{\n  "is_urgent": {\n    "type": "noul",\n    "instructions": "Does this convey urgency?"\n  },\n  "department": {\n    "type": "choice",\n    "instructions": "Which team should handle this?",\n    "criteria": {\n      "billing": "Payments, invoicing, refunds",\n      "technical": "Bugs, outages, integrations",\n      "sales": null\n    }\n  },\n  "frustration": {\n    "type": "score",\n    "instructions": "How frustrated is the customer?",\n    "criteria": ["Calm", "Frustrated", "Very angry"]\n  }\n}',
+				displayOptions: {
+					show: { questionsSource: ['json'] },
+				},
+				description:
+					'An object keyed by question ID, each value a question with "type", "instructions" and "criteria" as the TypeSafe API takes them, so questions can be pasted straight from its docs. Can also come from an expression, to ask different questions for each item.',
+			},
+			{
+				displayName:
+					'The questions come from an expression, so the node cannot know them until it runs: it uses a single output. Write the JSON in the node to get one output per question.',
+				name: 'dynamicJsonNotice',
+				type: 'notice',
+				default: '',
+				// n8n stops checking a show rule as soon as a watched field holds an expression,
+				// and displays the parameter. So the JSON field goes last: the output mode and
+				// the source are tested first, and the notice appears only when both match.
+				displayOptions: {
+					show: {
+						outputMode: ['perQuestion'],
+						questionsSource: ['json'],
+						questionsJson: [{ _cnd: { startsWith: '=' } }],
+					},
+				},
+			},
+			{
 				displayName: 'Options',
 				name: 'options',
 				type: 'collection',
@@ -565,10 +697,27 @@ export class TypeSafe implements INodeType {
 		// The node's shape is fixed by the parameters as they stand in the editor, so
 		// the branch count comes from item 0 and stays put for every item.
 		const outputMode = this.getNodeParameter('outputMode', 0, 'single') as string;
-		const branchCount =
-			outputMode === 'perQuestion'
-				? (this.getNodeParameter('questions.question', 0, []) as QuestionInput[]).length
-				: 0;
+		const questionsSource = this.getNodeParameter('questionsSource', 0, 'fields') as string;
+
+		// JSON written in the node fixes the questions. JSON from an expression is only known
+		// once it runs and may differ per item, so its branches cannot be drawn in advance:
+		// the editor shows one output with a notice, and the node runs as Single Output.
+		const rawQuestionsJson =
+			questionsSource === 'json'
+				? this.getNodeParameter('questionsJson', 0, '', { rawExpressions: true })
+				: undefined;
+		const dynamicJson =
+			typeof rawQuestionsJson === 'string' && rawQuestionsJson.charAt(0) === '=';
+
+		// Must agree exactly with configuredOutputs, which draws the outputs from the same
+		// parameters, or items would be sent to outputs that do not exist.
+		let branchCount = 0;
+		if (outputMode === 'perQuestion' && !dynamicJson) {
+			branchCount =
+				questionsSource === 'json'
+					? countJsonQuestions(this.getNodeParameter('questionsJson', 0, ''))
+					: (this.getNodeParameter('questions.question', 0, []) as QuestionInput[]).length;
+		}
 		const perQuestion = outputMode === 'perQuestion' && branchCount > 0;
 		const returnData: INodeExecutionData[][] = perQuestion
 			? Array.from({ length: branchCount }, () => [])
@@ -581,11 +730,10 @@ export class TypeSafe implements INodeType {
 			try {
 				const model = this.getNodeParameter('model', itemIndex) as string;
 				const stateType = this.getNodeParameter('stateType', itemIndex) as 'json' | 'text';
-				const questionInputs = this.getNodeParameter(
-					'questions.question',
-					itemIndex,
-					[],
-				) as QuestionInput[];
+				const questionInputs =
+					questionsSource === 'json'
+						? []
+						: (this.getNodeParameter('questions.question', itemIndex, []) as QuestionInput[]);
 				const options = this.getNodeParameter('options', itemIndex, {}) as {
 					maxRetries?: number;
 					outputField?: string;
@@ -608,15 +756,115 @@ export class TypeSafe implements INodeType {
 					}
 				}
 
-				if (questionInputs.length === 0) {
+				// Every question is gathered as [id, definition] first, whichever way it was
+				// written, and then held to one set of rules below.
+				const definitions: Array<[string, unknown]> = [];
+
+				if (questionsSource === 'json') {
+					const rawJson = this.getNodeParameter('questionsJson', itemIndex, '') as unknown;
+					let parsed: unknown;
+					try {
+						parsed = typeof rawJson === 'string' ? JSON.parse(rawJson) : rawJson;
+					} catch (error) {
+						throw new NodeOperationError(
+							this.getNode(),
+							`Questions (JSON) is not valid JSON: ${(error as Error).message}`,
+							{ itemIndex },
+						);
+					}
+					if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+						throw new NodeOperationError(
+							this.getNode(),
+							'Questions (JSON) must be an object keyed by question ID, like the questions field of the TypeSafe API',
+							{ itemIndex },
+						);
+					}
+					definitions.push(...Object.entries(parsed as Record<string, unknown>));
+				} else {
+					for (const input of questionInputs) {
+						const id = input.id ?? '';
+
+						if (input.defineAsJson === true) {
+							try {
+								definitions.push([
+									id,
+									typeof input.questionJson === 'string'
+										? JSON.parse(input.questionJson)
+										: input.questionJson,
+								]);
+							} catch (error) {
+								throw new NodeOperationError(
+									this.getNode(),
+									`Question "${id.trim()}" is not valid JSON: ${(error as Error).message}`,
+									{ itemIndex },
+								);
+							}
+							continue;
+						}
+
+						// The field checks keep their own wording, which talks about the fields
+						// someone filled in rather than the JSON they never saw.
+						const instructions = (input.instructions ?? '').trim();
+						if (instructions.length === 0) {
+							throw new NodeOperationError(
+								this.getNode(),
+								`Question "${id.trim()}" needs instructions`,
+								{ itemIndex },
+							);
+						}
+
+						const type = input.type ?? 'noul';
+
+						if (type === 'noul') {
+							const question: Question = { type, instructions };
+							const meansYes = (input.criteriaTrue ?? '').trim();
+							const meansNo = (input.criteriaFalse ?? '').trim();
+							if (meansYes.length > 0 || meansNo.length > 0) {
+								question.criteria = {
+									...(meansYes.length > 0 ? { true: meansYes } : {}),
+									...(meansNo.length > 0 ? { false: meansNo } : {}),
+								};
+							}
+							definitions.push([id, question]);
+							continue;
+						}
+
+						if (type === 'choice') {
+							const criteria = parseChoiceCriteria(input.choiceCriteria);
+							if (Object.keys(criteria).length < 2) {
+								throw new NodeOperationError(
+									this.getNode(),
+									`Choice question "${id.trim()}" needs at least two options`,
+									{ itemIndex },
+								);
+							}
+							definitions.push([id, { type, instructions, criteria }]);
+							continue;
+						}
+
+						const levels = nonEmptyLines(input.scoreCriteria);
+						if (levels.length < 2) {
+							throw new NodeOperationError(
+								this.getNode(),
+								`Score question "${id.trim()}" needs at least two levels`,
+								{ itemIndex },
+							);
+						}
+						definitions.push([id, { type, instructions, criteria: levels }]);
+					}
+				}
+
+				if (definitions.length === 0) {
 					throw new NodeOperationError(this.getNode(), 'Add at least one question', {
 						itemIndex,
 					});
 				}
 
 				const questions: Record<string, Question> = {};
-				for (const input of questionInputs) {
-					const id = (input.id ?? '').trim();
+				// Question order, which is also branch order when there is one output per question.
+				const questionIds: string[] = [];
+				for (const [rawId, definition] of definitions) {
+					const id = rawId.trim();
 					if (id.length === 0) {
 						throw new NodeOperationError(this.getNode(), 'Every question needs an ID', {
 							itemIndex,
@@ -629,80 +877,14 @@ export class TypeSafe implements INodeType {
 							{ itemIndex },
 						);
 					}
-
-					if (input.defineAsJson === true) {
-						let parsed: Question;
-						try {
-							parsed = (
-								typeof input.questionJson === 'string'
-									? JSON.parse(input.questionJson)
-									: input.questionJson
-							) as Question;
-						} catch (error) {
-							throw new NodeOperationError(
-								this.getNode(),
-								`Question "${id}" is not valid JSON: ${(error as Error).message}`,
-								{ itemIndex },
-							);
-						}
-						if (parsed?.type === undefined || parsed?.instructions === undefined) {
-							throw new NodeOperationError(
-								this.getNode(),
-								`Question "${id}" needs both "type" and "instructions"`,
-								{ itemIndex },
-							);
-						}
-						questions[id] = parsed;
-						continue;
+					const problem = questionProblem(definition);
+					if (problem !== undefined) {
+						throw new NodeOperationError(this.getNode(), `Question "${id}" ${problem}`, {
+							itemIndex,
+						});
 					}
-
-					const instructions = (input.instructions ?? '').trim();
-					if (instructions.length === 0) {
-						throw new NodeOperationError(
-							this.getNode(),
-							`Question "${id}" needs instructions`,
-							{ itemIndex },
-						);
-					}
-
-					const type = input.type ?? 'noul';
-
-					if (type === 'noul') {
-						const question: Question = { type, instructions };
-						const meansYes = (input.criteriaTrue ?? '').trim();
-						const meansNo = (input.criteriaFalse ?? '').trim();
-						if (meansYes.length > 0 || meansNo.length > 0) {
-							question.criteria = {
-								...(meansYes.length > 0 ? { true: meansYes } : {}),
-								...(meansNo.length > 0 ? { false: meansNo } : {}),
-							};
-						}
-						questions[id] = question;
-						continue;
-					}
-
-					if (type === 'choice') {
-						const criteria = parseChoiceCriteria(input.choiceCriteria);
-						if (Object.keys(criteria).length < 2) {
-							throw new NodeOperationError(
-								this.getNode(),
-								`Choice question "${id}" needs at least two options`,
-								{ itemIndex },
-							);
-						}
-						questions[id] = { type, instructions, criteria };
-						continue;
-					}
-
-					const levels = nonEmptyLines(input.scoreCriteria);
-					if (levels.length < 2) {
-						throw new NodeOperationError(
-							this.getNode(),
-							`Score question "${id}" needs at least two levels`,
-							{ itemIndex },
-						);
-					}
-					questions[id] = { type, instructions, criteria: levels };
+					questions[id] = definition as Question;
+					questionIds.push(id);
 				}
 
 				const maxRetries = options.maxRetries ?? 3;
@@ -817,10 +999,9 @@ export class TypeSafe implements INodeType {
 					// Branch n carries question n, matched by position rather than by id so
 					// that an id built from an expression still lands on the right branch.
 					for (let branch = 0; branch < branchCount; branch++) {
-						const input = questionInputs[branch];
-						if (input === undefined) continue;
+						const id = questionIds[branch];
+						if (id === undefined) continue;
 
-						const id = (input.id ?? '').trim();
 						const answer = answers[id];
 						// A question with no answer leaves its branch empty, which stops the
 						// downstream nodes on that branch rather than feeding them a blank.
