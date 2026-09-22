@@ -19,8 +19,8 @@ const RETRYABLE_STATUS_CODES = [429, 529];
  * Ceiling on a single retry wait, and on the whole retry sequence for one item.
  * retry-after comes from the API or from any proxy in between, so it is a hint rather
  * than an instruction: a single large header would otherwise hold an n8n worker for as
- * long as it says. The budget is checked before sleeping, so the node gives up rather
- * than starting a wait it cannot finish inside it.
+ * long as it says. Each wait is capped, then trimmed to whatever budget is left, so a
+ * retry can come sooner than retry-after asked; once the budget is spent the node stops.
  */
 const MAX_RETRY_WAIT_MS = 15_000;
 const RETRY_BUDGET_MS = 30_000;
@@ -30,8 +30,14 @@ const RETRY_BUDGET_MS = 30_000;
  * `httpRequestWithAuthentication` throws rather than returning a response when the
  * socket times out or drops, so without this the retry loop is bypassed entirely and a
  * one-off network blip fails the item.
+ *
+ * Codes are compared exactly. n8n makes requests through axios, whose default code for a
+ * timed-out request is ECONNABORTED rather than ETIMEDOUT, so both are listed.
+ * ERR_CANCELED is deliberately absent: that is someone stopping the execution, and
+ * retrying it would override them.
  */
-const RETRYABLE_ERROR_PATTERNS = [
+const RETRYABLE_ERROR_CODES = new Set([
+	'ECONNABORTED',
 	'ETIMEDOUT',
 	'ESOCKETTIMEDOUT',
 	'ECONNRESET',
@@ -39,26 +45,38 @@ const RETRYABLE_ERROR_PATTERNS = [
 	'EPIPE',
 	'EAI_AGAIN',
 	'ENOTFOUND',
+	'ERR_NETWORK',
+]);
+
+/**
+ * Fallback for failures that carry no usable code. Whole phrases rather than words: a
+ * bare "timeout" or "network" also matches ordinary rejections that merely mention one.
+ */
+const RETRYABLE_MESSAGE_PHRASES = [
 	'socket hang up',
-	'timeout',
-	'timed out',
-	'network',
+	// axios: "timeout of 30000ms exceeded"
+	'timeout of ',
 ];
 
 /** Whether a thrown request error looks like a transport failure rather than a rejection. */
 function isRetryableTransportError(error: unknown): boolean {
-	const parts = [
-		(error as { code?: unknown })?.code,
-		(error as { cause?: { code?: unknown } })?.cause?.code,
-		(error as { message?: unknown })?.message,
-		(error as { cause?: { message?: unknown } })?.cause?.message,
-	]
-		.filter((part): part is string | number => part !== undefined && part !== null)
-		.map((part) => String(part).toLowerCase());
+	if (error === null || typeof error !== 'object') return false;
+	const candidate = error as { code?: unknown; message?: unknown; cause?: unknown };
+	const cause =
+		candidate.cause !== null && typeof candidate.cause === 'object'
+			? (candidate.cause as { code?: unknown; message?: unknown })
+			: undefined;
 
-	if (parts.length === 0) return false;
-	return RETRYABLE_ERROR_PATTERNS.some((pattern) =>
-		parts.some((part) => part.includes(pattern.toLowerCase())),
+	const codes = [candidate.code, cause?.code].filter(
+		(code): code is string => typeof code === 'string',
+	);
+	if (codes.some((code) => RETRYABLE_ERROR_CODES.has(code))) return true;
+
+	const messages = [candidate.message, cause?.message]
+		.filter((message): message is string => typeof message === 'string')
+		.map((message) => message.toLowerCase());
+	return RETRYABLE_MESSAGE_PHRASES.some((phrase) =>
+		messages.some((message) => message.includes(phrase)),
 	);
 }
 
@@ -436,7 +454,7 @@ export class TypeSafe implements INodeType {
 						typeOptions: { minValue: 0, maxValue: 10 },
 						default: 3,
 						description:
-							'How many times to retry when TypeSafe returns 429 Too Many Requests or 529 Overloaded, or when the request times out or the connection drops. Waits use the retry-after header when present, otherwise exponential backoff.',
+							'How many times to retry when TypeSafe returns 429 Too Many Requests or 529 Overloaded, or when the request times out or the connection drops. Waits use the retry-after header when present, capped at 15s each, otherwise exponential backoff. Retrying also stops once 30s have been spent waiting on one item, whichever limit comes first.',
 					},
 					{
 						displayName: 'Put Output in Field',
@@ -698,7 +716,14 @@ export class TypeSafe implements INodeType {
 						throw new NodeApiError(this.getNode(), httpResponse.body as JsonObject, {
 							httpCode: String(httpResponse.statusCode),
 							itemIndex,
-							message: `TypeSafe asked to retry after ${retryAfter}s, which exceeds the ${RETRY_BUDGET_MS / 1000}s retry budget for one item`,
+							// waitBeforeRetry only refuses once the budget is spent, so the cause is
+							// the sum of the waits rather than any one retry-after, and the header
+							// may be absent altogether when the waits came from backoff.
+							message: `TypeSafe still answered ${httpResponse.statusCode} after ${attempt + 1} attempt(s), and the ${RETRY_BUDGET_MS / 1000}s retry budget for one item is spent${
+								Number.isFinite(retryAfter) && retryAfter > 0
+									? ` (last retry-after: ${retryAfter}s)`
+									: ''
+							}`,
 						});
 					}
 				}

@@ -63,6 +63,9 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      - name: Test
+        run: npm test
+
       # The icon and the codex file are copied by a gulp task rather than by tsc,
       # and a build once completed with them missing. Fail here rather than ship
       # a node with no icon.

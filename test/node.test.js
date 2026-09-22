@@ -225,3 +225,63 @@ test('fails when an answer arrives for a question that was not asked', async (t)
 	assert.equal(result.ok, false);
 	assert.match(String(result.error.message), /not asked/i);
 });
+
+test('retries a timeout raised with axios default code ECONNABORTED', async (t) => {
+	// n8n makes requests through axios, which reports a timeout as ECONNABORTED unless
+	// clarifyTimeoutError is set. Missing that code, the retry only happened because the
+	// message happened to contain the word "timeout".
+	const result = await run(t, [
+		// No timeout phrase in the message, so only the code can make this retry.
+		{ throws: { code: 'ECONNABORTED', message: 'aborted' } },
+		{ status: 200, body: OK_BODY },
+	]);
+	assert.equal(result.ok, true);
+	assert.equal(result.attempts, 2);
+});
+
+test('retries an axios timeout that carries only its message', async (t) => {
+	const result = await run(t, [
+		{ throws: { message: 'timeout of 30000ms exceeded' } },
+		{ status: 200, body: OK_BODY },
+	]);
+	assert.equal(result.ok, true);
+	assert.equal(result.attempts, 2);
+});
+
+// A bare substring match on "network" or "timeout" retried these three times over.
+// run() enables fake timers, so each message needs a test of its own.
+for (const message of ['Invalid network policy', 'Parameter "timeout" is not allowed']) {
+	test(`does not retry a rejection that merely mentions a word: ${message}`, async (t) => {
+		const result = await run(t, [{ throws: { message } }]);
+		assert.equal(result.ok, false);
+		assert.equal(result.attempts, 1, 'should fail fast rather than retry');
+	});
+}
+
+test('does not retry an execution that was cancelled', async (t) => {
+	const result = await run(t, [{ throws: { code: 'ERR_CANCELED', message: 'canceled' } }]);
+	assert.equal(result.ok, false);
+	assert.equal(result.attempts, 1);
+});
+
+test('reports a spent budget without a NaN when there was no retry-after header', async (t) => {
+	// With no header the waits come from backoff, and the old message printed the missing
+	// header as "retry after NaNs".
+	const result = await run(t, [{ status: 529 }], { options: { maxRetries: 10 } });
+	assert.equal(result.ok, false);
+	const message = String(result.error.message);
+	assert.match(message, /retry budget/i);
+	assert.doesNotMatch(message, /NaN/);
+});
+
+test('does not blame one retry-after when the budget ran out across several', async (t) => {
+	// Six waits of 5s spend the 30s budget; no single one exceeded it.
+	const result = await run(t, [{ status: 429, headers: { 'retry-after': '5' } }], {
+		options: { maxRetries: 10 },
+	});
+	assert.equal(result.ok, false);
+	const message = String(result.error.message);
+	assert.match(message, /retry budget/i);
+	assert.doesNotMatch(message, /exceeds/i);
+	assert.match(message, /last retry-after: 5s/);
+});

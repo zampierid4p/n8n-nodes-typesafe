@@ -55,6 +55,14 @@ It is off by default on purpose: it discards the probabilities and confidence th
 tell you whether a judgment is safe to act on. See
 [Confidence](https://docs.typesafe.ai/confidence.md) before turning it on.
 
+### Answer types are checked
+
+The node knows which type it asked each question as, and compares that with the
+type of the answer before reading any value. A mismatch, or an answer for a
+question that was never asked, fails the item with an error naming the question,
+rather than letting a string reach a downstream numeric comparison and quietly
+evaluate false.
+
 ### Output mode
 
 By default the node has one output carrying every answer. Set **Output Mode** to
@@ -82,7 +90,7 @@ Switch node uses.
 
 | Option | Default | Notes |
 | --- | --- | --- |
-| Max Retries | `3` | Retries `429 Too Many Requests` and `529 Overloaded`, honouring `retry-after`, otherwise exponential backoff. Other statuses fail immediately. |
+| Max Retries | `3` | Retries `429 Too Many Requests`, `529 Overloaded`, timeouts and dropped connections. Honours `retry-after` up to 15s per wait, otherwise exponential backoff, and stops once 30s have been spent waiting on one item. Other failures, including a cancelled execution, fail immediately. |
 | Put Output in Field | — | Nest the result under a field |
 | Simplify | `false` | Answer values only, dropping probabilities and confidence |
 
@@ -111,7 +119,12 @@ In n8n: **Settings → Community nodes → Install** → `n8n-nodes-typesafe`.
 npm install --ignore-scripts
 npm run build
 npm run lint
+npm test
 ```
+
+`npm test` builds first and runs against the compiled node, with Node's built-in
+test runner and fake timers, so the retry waits are asserted exactly and the
+suite does not spend real seconds asleep.
 
 `--ignore-scripts` is recommended: `n8n-workflow` pulls in `isolated-vm`, whose
 native build this package never uses — it only needs the types.
