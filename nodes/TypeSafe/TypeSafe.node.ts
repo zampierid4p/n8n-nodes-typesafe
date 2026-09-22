@@ -16,6 +16,16 @@ const CREDENTIAL = 'typeSafeApi';
 const RETRYABLE_STATUS_CODES = [429, 529];
 
 /**
+ * Ceiling on a single retry wait, and on the whole retry sequence for one item.
+ * retry-after comes from the API or from any proxy in between, so it is a hint rather
+ * than an instruction: a single large header would otherwise hold an n8n worker for as
+ * long as it says. The budget is checked before sleeping, so the node gives up rather
+ * than starting a wait it cannot finish inside it.
+ */
+const MAX_RETRY_WAIT_MS = 15_000;
+const RETRY_BUDGET_MS = 30_000;
+
+/**
  * Transport failures worth retrying. These never reach the status-code check, because
  * `httpRequestWithAuthentication` throws rather than returning a response when the
  * socket times out or drops, so without this the retry loop is bypassed entirely and a
@@ -626,6 +636,16 @@ export class TypeSafe implements INodeType {
 
 				const maxRetries = options.maxRetries ?? 3;
 				let response: SystemOneResponse | undefined;
+				let retryBudgetMs = RETRY_BUDGET_MS;
+
+				/** Sleeps if the budget allows, and reports whether the retry may proceed. */
+				const waitBeforeRetry = async (requestedMs: number): Promise<boolean> => {
+					const waitMs = Math.min(requestedMs, MAX_RETRY_WAIT_MS, retryBudgetMs);
+					if (waitMs <= 0) return false;
+					retryBudgetMs -= waitMs;
+					await sleep(waitMs);
+					return true;
+				};
 
 				for (let attempt = 0; ; attempt++) {
 					let httpResponse: { statusCode: number; headers: IDataObject; body: unknown };
@@ -649,7 +669,7 @@ export class TypeSafe implements INodeType {
 						// 429. Anything that is not a transport failure is a real rejection
 						// and is rethrown untouched.
 						if (attempt >= maxRetries || !isRetryableTransportError(error)) throw error;
-						await sleep(2 ** attempt * 500);
+						if (!(await waitBeforeRetry(2 ** attempt * 500))) throw error;
 						continue;
 					}
 
@@ -667,14 +687,44 @@ export class TypeSafe implements INodeType {
 					}
 
 					const retryAfter = Number(httpResponse.headers?.['retry-after']);
-					const waitMs =
+					const requestedMs =
 						Number.isFinite(retryAfter) && retryAfter > 0
 							? retryAfter * 1000
 							: 2 ** attempt * 500;
-					await sleep(waitMs);
+
+					// Out of budget means stop, and surface the response that caused it rather
+					// than a generic timeout, so the cause is visible in the item.
+					if (!(await waitBeforeRetry(requestedMs))) {
+						throw new NodeApiError(this.getNode(), httpResponse.body as JsonObject, {
+							httpCode: String(httpResponse.statusCode),
+							itemIndex,
+							message: `TypeSafe asked to retry after ${retryAfter}s, which exceeds the ${RETRY_BUDGET_MS / 1000}s retry budget for one item`,
+						});
+					}
 				}
 
 				const answers = response.answers ?? {};
+
+				// Dispatching on the type the server declared would let a mismatched response
+				// through as a silently wrong value: a noul answered as a choice reaches a
+				// downstream numeric comparison as a string and quietly evaluates false. The
+				// node knows what it asked, so a mismatch is an error rather than a value.
+				for (const [id, answer] of Object.entries(answers)) {
+					const asked = (questions[id] as { type?: string } | undefined)?.type;
+					const got = (answer as { type?: string } | undefined)?.type;
+					if (asked === undefined) {
+						throw new NodeApiError(this.getNode(), answers as unknown as JsonObject, {
+							itemIndex,
+							message: `TypeSafe answered a question that was not asked: "${id}"`,
+						});
+					}
+					if (got !== asked) {
+						throw new NodeApiError(this.getNode(), answers as unknown as JsonObject, {
+							itemIndex,
+							message: `Question "${id}" was asked as a ${asked} but TypeSafe answered with type "${got ?? 'missing'}"`,
+						});
+					}
+				}
 				const nest = (value: IDataObject): IDataObject =>
 					options.outputField ? { [options.outputField]: value } : value;
 
