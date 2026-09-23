@@ -130,6 +130,16 @@ Switch node uses.
 > links, and nothing will warn you — the wiring simply points at a different
 > judgment. Check the connections after changing the question list.
 
+### Also available as an AI Agent tool
+
+The node declares `usableAsTool`, so n8n publishes a second node type built from
+it: **TypeSafe Tool**. It carries the same questions and credential, its output
+connects to an agent's tool port instead of the main flow, and it gains a *Tool
+Description* field telling the agent when to reach for it.
+
+That gives an agent a way to ask for a calibrated judgment — is this safe, which
+of these, how severe — and get a number back, rather than deciding in prose.
+
 ### Options
 
 | Option | Default | Notes |
@@ -163,8 +173,14 @@ In n8n: **Settings → Community nodes → Install** → `n8n-nodes-typesafe`.
 npm install --ignore-scripts
 npm run build
 npm run lint
+npm run lint:scan
 npm test
 ```
+
+`npm run lint:scan` runs the rules n8n's community scanner gates on, using the
+scanner's own configuration against these sources. The scanner itself only
+accepts a package that is already on npm, so without this a violation would only
+surface after publishing. It runs on every push and before every release.
 
 `npm test` builds first and runs against the compiled node, with Node's built-in
 test runner and fake timers, so the retry waits are asserted exactly and the

@@ -1,6 +1,6 @@
 {
   "name": "n8n-nodes-typesafe",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "n8n community node for TypeSafe System One models: ask Choice, Noul and Score questions and get calibrated, typed answers",
   "keywords": [
     "n8n-community-node-package",
