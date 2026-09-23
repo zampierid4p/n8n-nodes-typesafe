@@ -1,5 +1,6 @@
 import type {
 	IDataObject,
+	INode,
 	IExecuteFunctions,
 	ILoadOptionsFunctions,
 	INodeExecutionData,
@@ -8,7 +9,7 @@ import type {
 	INodeTypeDescription,
 	JsonObject,
 } from 'n8n-workflow';
-import { NodeApiError, NodeOperationError, sleep } from 'n8n-workflow';
+import { NodeApiError, NodeConnectionTypes, NodeOperationError, sleep } from 'n8n-workflow';
 
 const CREDENTIAL = 'typeSafeApi';
 
@@ -190,7 +191,8 @@ function questionProblem(question: unknown): string | undefined {
 		return 'needs instructions';
 	}
 
-	const isPlainObject = criteria !== null && typeof criteria === 'object' && !Array.isArray(criteria);
+	const isPlainObject =
+		criteria !== null && typeof criteria === 'object' && !Array.isArray(criteria);
 
 	if (type === 'choice' && (!isPlainObject || Object.keys(criteria as object).length < 2)) {
 		return 'needs "criteria" as an object with at least two options';
@@ -257,6 +259,20 @@ function answerValueProblem(question: Question, answer: Answer): string | undefi
 	return undefined;
 }
 
+/**
+ * The error to surface for an item. Validation failures and API rejections are already n8n
+ * errors carrying their own message, so they pass through unchanged; anything else is
+ * wrapped, because a raw error reaching the editor arrives without its HTTP context.
+ */
+function asNodeError(
+	node: INode,
+	error: unknown,
+	itemIndex: number,
+): NodeApiError | NodeOperationError {
+	if (error instanceof NodeApiError || error instanceof NodeOperationError) return error;
+	return new NodeApiError(node, error as JsonObject, { itemIndex });
+}
+
 /** The scalar a caller usually wants out of an answer. */
 function answerValue(answer: Answer): number | string {
 	if (answer.type === 'noul') return answer.noul;
@@ -308,7 +324,9 @@ const configuredOutputs = (parameters: IDataObject) => {
 	} else {
 		const collection = parameters.questions as IDataObject | undefined;
 		const questions =
-			collection && Array.isArray(collection.question) ? (collection.question as IDataObject[]) : [];
+			collection && Array.isArray(collection.question)
+				? (collection.question as IDataObject[])
+				: [];
 		ids = questions.map((question) => (typeof question.id === 'string' ? question.id.trim() : ''));
 	}
 	if (ids.length === 0) return single;
@@ -323,15 +341,16 @@ export class TypeSafe implements INodeType {
 	description: INodeTypeDescription = {
 		displayName: 'TypeSafe',
 		name: 'typeSafe',
-		icon: 'file:typeSafe.svg',
+		icon: { light: 'file:typeSafe.svg', dark: 'file:typeSafe.dark.svg' },
 		group: ['transform'],
+		usableAsTool: true,
 		version: 1,
 		subtitle: '={{$parameter["operation"]}}',
 		description: 'Ask a TypeSafe System One model typed questions about your data',
 		defaults: {
 			name: 'TypeSafe',
 		},
-		inputs: ['main'],
+		inputs: [NodeConnectionTypes.Main],
 		// eslint-disable-next-line n8n-nodes-base/node-class-description-outputs-wrong
 		outputs: `={{(${configuredOutputs})($parameter)}}`,
 		credentials: [
@@ -474,10 +493,18 @@ export class TypeSafe implements INodeType {
 					{
 						name: 'question',
 						displayName: 'Question',
-						// Kept in fill-in order rather than alphabetical: Type drives which
-						// criteria fields below it are shown, so it has to come before them.
-						// eslint-disable-next-line n8n-nodes-base/node-param-fixed-collection-type-unsorted-items
+						// Alphabetical by displayName, which the n8n community scanner enforces
+						// and will not let a disable comment override. Type therefore appears
+						// after the criteria fields whose visibility it drives.
 						values: [
+							{
+								displayName: 'Define as JSON',
+								name: 'defineAsJson',
+								type: 'boolean',
+								default: false,
+								description:
+									'Whether to supply the whole question object as JSON, for structured instructions and criteria',
+							},
 							{
 								displayName: 'ID',
 								name: 'id',
@@ -488,12 +515,61 @@ export class TypeSafe implements INodeType {
 									'Key this answer comes back under. It is not sent to the model, so put the full meaning in the instructions.',
 							},
 							{
-								displayName: 'Define as JSON',
-								name: 'defineAsJson',
-								type: 'boolean',
-								default: false,
+								displayName: 'Instructions',
+								name: 'instructions',
+								type: 'string',
+								typeOptions: { rows: 3 },
+								default: '',
+								displayOptions: {
+									show: { defineAsJson: [false] },
+								},
+								description: 'The judgment the model should make',
+							},
+							{
+								displayName: 'Levels',
+								name: 'scoreCriteria',
+								type: 'string',
+								typeOptions: { rows: 5 },
+								default: '',
+								displayOptions: {
+									show: { defineAsJson: [false], type: ['score'] },
+								},
+								placeholder: 'Calm',
 								description:
-									'Whether to supply the whole question object as JSON, for structured instructions and criteria',
+									'One level per line, ordered from lowest to highest. Each level should describe a concrete situation. At least two levels are needed.',
+							},
+							{
+								displayName: 'Means No',
+								name: 'criteriaFalse',
+								type: 'string',
+								default: '',
+								displayOptions: {
+									show: { defineAsJson: [false], type: ['noul'] },
+								},
+								description: 'What a probability near 0 means',
+							},
+							{
+								displayName: 'Means Yes',
+								name: 'criteriaTrue',
+								type: 'string',
+								default: '',
+								displayOptions: {
+									show: { defineAsJson: [false], type: ['noul'] },
+								},
+								description: 'What a probability near 1 means',
+							},
+							{
+								displayName: 'Options',
+								name: 'choiceCriteria',
+								type: 'string',
+								typeOptions: { rows: 5 },
+								default: '',
+								displayOptions: {
+									show: { defineAsJson: [false], type: ['choice'] },
+								},
+								placeholder: 'billing = Payments, invoicing, refunds',
+								description:
+									'One option per line, written as "option = description". The description is optional; omit it and just write the option. At least two options are needed.',
 							},
 							{
 								displayName: 'Question (JSON)',
@@ -533,63 +609,6 @@ export class TypeSafe implements INodeType {
 									show: { defineAsJson: [false] },
 								},
 								description: 'What kind of answer this question returns',
-							},
-							{
-								displayName: 'Instructions',
-								name: 'instructions',
-								type: 'string',
-								typeOptions: { rows: 3 },
-								default: '',
-								displayOptions: {
-									show: { defineAsJson: [false] },
-								},
-								description: 'The judgment the model should make',
-							},
-							{
-								displayName: 'Means Yes',
-								name: 'criteriaTrue',
-								type: 'string',
-								default: '',
-								displayOptions: {
-									show: { defineAsJson: [false], type: ['noul'] },
-								},
-								description: 'What a probability near 1 means',
-							},
-							{
-								displayName: 'Means No',
-								name: 'criteriaFalse',
-								type: 'string',
-								default: '',
-								displayOptions: {
-									show: { defineAsJson: [false], type: ['noul'] },
-								},
-								description: 'What a probability near 0 means',
-							},
-							{
-								displayName: 'Options',
-								name: 'choiceCriteria',
-								type: 'string',
-								typeOptions: { rows: 5 },
-								default: '',
-								displayOptions: {
-									show: { defineAsJson: [false], type: ['choice'] },
-								},
-								placeholder: 'billing = Payments, invoicing, refunds',
-								description:
-									'One option per line, written as "option = description". The description is optional; omit it and just write the option. At least two options are needed.',
-							},
-							{
-								displayName: 'Levels',
-								name: 'scoreCriteria',
-								type: 'string',
-								typeOptions: { rows: 5 },
-								default: '',
-								displayOptions: {
-									show: { defineAsJson: [false], type: ['score'] },
-								},
-								placeholder: 'Calm',
-								description:
-									'One level per line, ordered from lowest to highest. Each level should describe a concrete situation. At least two levels are needed.',
 							},
 						],
 					},
@@ -667,18 +686,16 @@ export class TypeSafe implements INodeType {
 				const credentials = await this.getCredentials(CREDENTIAL);
 				const baseUrl = (credentials.baseUrl as string).replace(/\/+$/, '');
 
-				const response = (await this.helpers.httpRequestWithAuthentication.call(
-					this,
-					CREDENTIAL,
-					{
-						method: 'GET',
-						url: `${baseUrl}/models`,
-						json: true,
-					},
-				)) as { models?: Array<{ name: string; description?: string }> } | Array<{
-					name: string;
-					description?: string;
-				}>;
+				const response = (await this.helpers.httpRequestWithAuthentication.call(this, CREDENTIAL, {
+					method: 'GET',
+					url: `${baseUrl}/models`,
+					json: true,
+				})) as
+					| { models?: Array<{ name: string; description?: string }> }
+					| Array<{
+							name: string;
+							description?: string;
+					  }>;
 
 				const models = Array.isArray(response) ? response : (response.models ?? []);
 
@@ -706,8 +723,7 @@ export class TypeSafe implements INodeType {
 			questionsSource === 'json'
 				? this.getNodeParameter('questionsJson', 0, '', { rawExpressions: true })
 				: undefined;
-		const dynamicJson =
-			typeof rawQuestionsJson === 'string' && rawQuestionsJson.charAt(0) === '=';
+		const dynamicJson = typeof rawQuestionsJson === 'string' && rawQuestionsJson.charAt(0) === '=';
 
 		// Must agree exactly with configuredOutputs, which draws the outputs from the same
 		// parameters, or items would be sent to outputs that do not exist.
@@ -921,8 +937,12 @@ export class TypeSafe implements INodeType {
 						// status, so it has to be caught here to reach the same backoff as a
 						// 429. Anything that is not a transport failure is a real rejection
 						// and is rethrown untouched.
-						if (attempt >= maxRetries || !isRetryableTransportError(error)) throw error;
-						if (!(await waitBeforeRetry(2 ** attempt * 500))) throw error;
+						if (attempt >= maxRetries || !isRetryableTransportError(error)) {
+							throw new NodeApiError(this.getNode(), error as JsonObject, { itemIndex });
+						}
+						if (!(await waitBeforeRetry(2 ** attempt * 500))) {
+							throw new NodeApiError(this.getNode(), error as JsonObject, { itemIndex });
+						}
 						continue;
 					}
 
@@ -941,9 +961,7 @@ export class TypeSafe implements INodeType {
 
 					const retryAfter = Number(httpResponse.headers?.['retry-after']);
 					const requestedMs =
-						Number.isFinite(retryAfter) && retryAfter > 0
-							? retryAfter * 1000
-							: 2 ** attempt * 500;
+						Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 2 ** attempt * 500;
 
 					// Out of budget means stop, and surface the response that caused it rather
 					// than a generic timeout, so the cause is visible in the item.
@@ -1044,7 +1062,7 @@ export class TypeSafe implements INodeType {
 					});
 					continue;
 				}
-				throw error;
+				throw asNodeError(this.getNode(), error, itemIndex);
 			}
 		}
 

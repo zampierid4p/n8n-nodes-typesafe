@@ -77,7 +77,10 @@ jobs:
             package/dist/nodes/TypeSafe/TypeSafe.node.js \
             package/dist/nodes/TypeSafe/TypeSafe.node.json \
             package/dist/nodes/TypeSafe/typeSafe.svg \
-            package/dist/credentials/TypeSafeApi.credentials.js
+            package/dist/nodes/TypeSafe/typeSafe.dark.svg \
+            package/dist/credentials/TypeSafeApi.credentials.js \
+            package/dist/credentials/typeSafe.svg \
+            package/dist/credentials/typeSafe.dark.svg
           do
             if ! grep -qx "$required" /tmp/tarball-files; then
               echo "::error::$required is missing from the tarball"

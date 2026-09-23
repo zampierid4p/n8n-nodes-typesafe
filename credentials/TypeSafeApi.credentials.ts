@@ -1,5 +1,6 @@
 import type {
 	IAuthenticateGeneric,
+	Icon,
 	ICredentialTestRequest,
 	ICredentialType,
 	INodeProperties,
@@ -9,6 +10,10 @@ export class TypeSafeApi implements ICredentialType {
 	name = 'typeSafeApi';
 
 	displayName = 'TypeSafe API';
+
+	// Two files rather than one that switches on prefers-color-scheme: that follows the
+	// operating system, while n8n picks the variant by its own theme.
+	icon: Icon = { light: 'file:typeSafe.svg', dark: 'file:typeSafe.dark.svg' };
 
 	documentationUrl = 'https://docs.typesafe.ai/api';
 
