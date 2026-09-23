@@ -1,0 +1,9 @@
+// What actually ships: only the node and the credential are compiled into dist.
+{
+	"extends": "./tsconfig.json",
+	"compilerOptions": {
+		"allowJs": false,
+		"noEmit": false
+	},
+	"include": ["credentials/**/*", "nodes/**/*"]
+}

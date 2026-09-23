@@ -1,6 +1,6 @@
 {
   "name": "n8n-nodes-typesafe",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "n8n community node for TypeSafe System One models: ask Choice, Noul and Score questions and get calibrated, typed answers",
   "keywords": [
     "n8n-community-node-package",
@@ -28,12 +28,11 @@
   "engines": {
     "node": ">=20.15"
   },
-  "main": "index.js",
   "files": [
     "dist"
   ],
   "scripts": {
-    "build": "npx rimraf dist && tsc && gulp build:icons",
+    "build": "npx rimraf dist && tsc -p tsconfig.build.json && gulp build:icons",
     "dev": "tsc --watch",
     "format": "prettier nodes credentials --write",
     "lint": "eslint nodes credentials package.json",
