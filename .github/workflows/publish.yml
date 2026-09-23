@@ -63,6 +63,12 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      # The published-package scanner is the real gate, but it only accepts a package
+      # already on npm. This runs its rules against these sources, so a violation fails
+      # here rather than after a release.
+      - name: n8n community scan rules
+        run: npm run lint:scan
+
       - name: Test
         run: npm test
 
